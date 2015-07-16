@@ -1,0 +1,26 @@
+Source: nailgun-agent
+Section: net
+Priority: extra
+Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
+Build-Depends: debhelper (>= 9), openstack-pkg-tools
+Standards-Version: 3.9.6
+Homepage: https://github.com/thomasgoirand/nailgun-agent
+Vcs-Git: git://anonscm.debian.org/openstack/nailgun-agent.git
+Vcs-Browser: http://anonscm.debian.org/gitweb/?p=openstack/nailgun-agent.git;a=summary
+
+Package: nailgun-agent
+Architecture: all
+XB-Ruby-Versions: ${ruby:Versions}
+Depends: ohai (<< 7),
+         ethtool,
+         ruby-cstruct,
+         ruby-httpclient,
+         ruby-ipaddress,
+         ruby-json,
+         ruby-rethtool,
+         ruby | ruby-interpreter,
+         ${misc:Depends}
+Description: collects a server’s hardware information and submits it
+ The agent nailgun-agent.rb collects the server’s hardware information and
+ submits it to Nailgun through the REST API. It is used inside the hardware
+ discovery bootstrap ISO image, on which nodes boot over PXE.
