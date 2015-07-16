@@ -1,0 +1,18 @@
+Source: nailgun
+Section: unknown
+Priority: net
+Maintainer: Mirantis Product <product@mirantis.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.2
+Homepage: mirantis.com
+
+Package: nailgun-agent
+Architecture: all
+Depends: ohai (<< 7),
+  ruby-httpclient,
+  ruby-rethtool,
+  ruby-cstruct,
+  ruby-json,
+  ethtool,
+  ${misc:Depends}
+Description: Nailgun startup agent
