@@ -1,0 +1,23 @@
+Source: nailgun
+Section: net
+Priority: extra
+Maintainer: Mirantis Product <product@mirantis.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.2
+Homepage: mirantis.com
+
+Package: nailgun-agent
+Architecture: all
+Depends: ohai (<< 7),
+  ruby-httpclient,
+  ruby-rethtool,
+  ruby-cstruct,
+  ruby-json,
+  ethtool,
+  ${misc:Depends}
+Description: collects a server’s hardware information and submits it
+ The nailgun agent collects the server’s hardware information and
+ submits it to Nailgun through the REST API. It is used inside the
+ hardware discovery bootstrap ISO image, on which nodes boot over
+ PXE and on installed nodes. Also it is setup Mcollective service
+ and it's report used to detect online/offline node status

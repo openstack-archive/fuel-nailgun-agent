@@ -1,0 +1,12 @@
+#!/usr/bin/make -f
+
+UPSTREAM_GIT = git://github.com/stackforge/fuel-nailgun-agent.git
+include /usr/share/openstack-pkg-tools/pkgos.make
+
+%:
+	dh $@
+
+override_dh_install:
+	dh_install
+	mkdir -p $(CURDIR)/debian/nailgun-agent/opt/nailgun/bin
+	cp agent $(CURDIR)/debian/nailgun-agent/opt/nailgun/bin/agent
