@@ -1,0 +1,10 @@
+Verified+2: Jenkins
+Code-Review+2: Vladimir Sharshov <vsharshov@mirantis.com>
+Workflow+1: Vladimir Sharshov <vsharshov@mirantis.com>
+Code-Review+1: Roman Vyalov <rvyalov@mirantis.com>
+Code-Review+1: Alexei Sheplyakov <asheplyakov@mirantis.com>
+Submitted-by: Jenkins
+Submitted-at: Wed, 22 Jul 2015 16:17:20 +0000
+Reviewed-on: https://review.openstack.org/202713
+Project: stackforge/fuel-nailgun-agent
+Branch: refs/heads/master
