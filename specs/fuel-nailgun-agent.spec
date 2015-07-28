@@ -5,7 +5,7 @@
 Name:      %{name}
 Version:   %{version}
 Release:   %{release}
-Source0:   fuel-%{name}-%{version}.tar.gz
+Source0:   file://fuel-%{name}-%{version}.tar.gz
 Summary:   Nailgun startup agent
 URL:       http://mirantis.com
 License:   ASL 2.0
@@ -30,7 +30,10 @@ online/offline status and for initial setup Mcollective service.
 %prep
 %setup -cq -n %{name}-%{version}
 
+%build
+
 %install
+rm -rf $RPM_BUILD_ROOT
 mkdir -p %{buildroot}%{_sysconfdir}/cron.d
 
 install -m 644 %{_builddir}/%{name}-%{version}/nailgun-agent.cron %{buildroot}%{_sysconfdir}/cron.d/nailgun-agent
@@ -40,5 +43,6 @@ install -p -D -m 755 %{_builddir}/%{name}-%{version}/agent %{buildroot}%{_bindir
 rm -rf $RPM_BUILD_ROOT
 
 %files
+%defattr(-,root,root)
 %{_bindir}/nailgun-agent
 %{_sysconfdir}/cron.d/nailgun-agent
