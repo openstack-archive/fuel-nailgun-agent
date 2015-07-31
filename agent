@@ -562,6 +562,8 @@ class NodeAgent
       :mac => (@os[:macaddress] rescue nil),
       :ip  => (@os[:ipaddress] rescue nil),
       :os_platform => (@os[:platform] rescue nil),
+      :pending_addition => (true if @os[:dmi][:system][:sku_number] rescue nil),
+      :cluster => (@os[:dmi][:system][:sku_number].to_i rescue nil),
     }
     begin
       detailed_data = _detailed
