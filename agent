@@ -563,6 +563,10 @@ class NodeAgent
       :ip  => (@os[:ipaddress] rescue nil),
       :os_platform => (@os[:platform] rescue nil),
     }
+    if !@os[:dmi][:system][:sku_number].eql? 'Not Specified'
+      res[:pending_addition] = true
+      res[:cluster] = @os[:dmi][:system][:sku_number].to_i
+    end
     begin
       detailed_data = _detailed
       master_data=_master_ip_and_mac
