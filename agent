@@ -475,6 +475,7 @@ class NodeAgent
       :family => (@os[:dmi][:system][:family].strip rescue nil),
       :version => (@os[:dmi][:system][:version].strip rescue nil),
       :fqdn => (@os[:fqdn].strip rescue @os[:hostname].strip rescue nil),
+      :sku  => (@os[:dmi][:system][:sku_number] rescue nil),
     }.delete_if { |key, value| value.nil? or value.empty? or value == "Not Specified" }
   end
 
