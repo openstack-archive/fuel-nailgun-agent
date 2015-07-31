@@ -563,6 +563,11 @@ class NodeAgent
       :ip  => (@os[:ipaddress] rescue nil),
       :os_platform => (@os[:platform] rescue nil),
     }
+    dmi_cluster_id = @os[:dmi][:system][:sku_number].to_i rescue 0
+    if dmi_cluster_id > 0
+      res[:pending_addition] = true
+      res[:cluster] = dmi_cluster_id
+    end
     begin
       detailed_data = _detailed
       master_data=_master_ip_and_mac
