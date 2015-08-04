@@ -129,7 +129,8 @@ class NodeAgent
     @logger = logger
 
     @api_default_address = "localhost"
-    @api_default_port = "8000"
+    @api_default_port = "8443"
+    @api_legacy_port = "8000"
 
     @api_url = url
 
@@ -145,9 +146,19 @@ class NodeAgent
         @logger.info("Can't get API url from /proc/cmdline. Will use localhost.")
         @api_ip = "127.0.0.1"
       end
-      @api_url = "http://#{@api_ip}:#{@api_default_port}/api"
+      begin
+        res = htclient.get("https://#{@api_ip}:#{@api_default_port}/")
+        @scheme = "https"
+      	@api_port = @api_default_port
+      rescue Errno::ECONNREFUSED
+        @logger.warn("Connection Refused catched when trying connect to HTTPS port. Use plain HTTP")
+        @scheme = "http"
+        @api_port = @api_legacy_port
+      end
+      @api_url = "#{@scheme}://#{@api_ip}:#{@api_port}/api"
     end
 
+    @logger.info("API URL is #{@api_url}")
     @os = ohai_system_info
   end
 
@@ -187,6 +198,8 @@ class NodeAgent
 
   def htclient
     client = HTTPClient.new
+    client.ssl_config.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    client.ssl_config.ssl_version = :TLSv1
     client.connect_timeout = 10
     client.send_timeout    = 10
     client.receive_timeout = 10  # (mihgen): Nailgun may hang for a while, but 10sec should be enough for him to respond
