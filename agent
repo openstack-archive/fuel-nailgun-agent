@@ -196,6 +196,13 @@ class NodeAgent
     res
   end
 
+  def get_master_node_uid
+    @logger.debug("Trying to get master node uid using #{@api_url}")
+    res = htclient.get("#{@api_url}/master_node_uid")
+    @logger.debug("Response: status: #{res.status} body: #{res.body}")
+    res
+  end
+
   def htclient
     client = HTTPClient.new
     client.ssl_config.verify_mode = OpenSSL::SSL::VERIFY_NONE
@@ -686,3 +693,33 @@ rescue => ex
   # NOTE(mihgen): There is no need to retry - cron will do it for us
   logger.error "#{ex.message}\n#{ex.backtrace}"
 end
+
+
+# NOTE(dmitryme): fix for
+# https://bugs.launchpad.net/fuel/7.0.x/+bug/1431386
+# We need to verify that Master Node UID has not changed.
+# If it has changed, that means that the Master Node was reinstalled
+# since we booted, and we have outdated MCollective config. In that
+# case the safest way to proceed is to reboot, as after reboot
+# the machine will be initialized with correct MCollective config.
+begin
+  resp = agent.get_master_node_uid
+  if resp.status == 200
+    unless File.exist?("/etc/master_node_uid")
+      write_data_to_file(logger, "/etc/master_node_uid", resp.body)
+    else
+      previous_uid = IO.read("/etc/master_node_uid")
+      if previous_uid != resp.body
+        # log reboot attempt, so that if it fails, we will know that
+        # we at least tried to do it
+        logger.info("Master node UID has changed, rebooting")
+        system("reboot")
+      else
+        logger.info("Master node UID hasn't changed: #{resp.body}")
+      end
+    end
+  end
+rescue => ex
+  logger.error "#{ex.message}\n#{ex.backtrace}"
+end
+
