@@ -46,6 +46,10 @@ STORAGE_CODES = [3, 8, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109,
 REMOVABLE_VENDORS = [
   "Adaptec", "IBM", "ServeRA",
 ]
+# PCI vendor IDs for Adaptec
+REMOVABLE_PCI_VENDORS = [
+  "0x1044", "0x9004", "0x9005",
+]
 
 def digest(body)
   if body.is_a? Hash
@@ -357,7 +361,12 @@ class NodeAgent
             @logger.debug("Block device seems to be physical data storage: #{bname}")
             block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
             if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
-              next
+              pci_vendor_id = _get_pci_vendor_id(bname)
+              @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
+              unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
+                next
+              end
+              @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
             dname = bname.gsub(/!/, '/')
 
@@ -383,6 +392,66 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def _get_pci_vendor_id(devname)
+    Timeout::timeout(30) do
+      udevadm_walk = {}
+      devpath = nil
+      # expected output of `udevadm info --attribute-walk --name=#{devname}`:
+      #
+      #  Udevadm info starts with the device specified by the devpath and then
+      #  walks up the chain of parent devices. It prints for every device
+      #  found, all possible attributes in the udev rules key format.
+      #  A rule to match, can be composed by the attributes of the device
+      #  and the attributes from one single parent device.
+      #
+      #    looking at device '/devices/pci0000:00/0000:00:1e.0/0000:0d:02.0/8:0:0:1/block/sdc':
+      #      KERNEL=="sdc"
+      #      SUBSYSTEM=="block"
+      #      DRIVER==""
+      #      ATTR{ro}=="0"
+      #      ATTR{size}=="30881792"
+      #      ATTR{removable}=="1"
+      #
+      #    looking at parent device '/devices/pci0000:00/0000:00:1e.0/0000:0d:02.0':
+      #      KERNELS=="0000:0d:02.0"
+      #      SUBSYSTEMS=="pci"
+      #      DRIVERS==""
+      #      ATTRS{device}=="0x9030"
+      #      ATTRS{vendor}=="0x10b5"
+      #
+      #    looking at parent device '/devices/pci0000:00/0000:00:1e.0':
+      #      KERNELS=="0000:00:1e.0"
+      #      SUBSYSTEMS=="pci"
+      #      DRIVERS==""
+      #      ATTRS{device}=="0x244e"
+      #      ATTRS{vendor}=="0x8086"
+      #
+      #    looking at parent device '/devices/pci0000:00':
+      #      KERNELS=="pci0000:00"
+      #      SUBSYSTEMS==""
+      #      DRIVERS==""
+      `udevadm info --attribute-walk --name=#{devname}`.split("\n").each do |line|
+        line.strip!
+        next unless line.start_with?('looking', 'KERNEL', 'SUBSYSTEM', 'DRIVER', 'ATTR')
+        if line.start_with?('looking')
+          devpath = line.split("'")[1]
+          udevadm_walk[devpath] = {}
+        else
+          key, value = line.split("==").each { |a| a.strip! }
+          udevadm_walk[devpath][key] = value.gsub(/(^")|("$)/, '')
+        end
+      end
+      # Trying to find the first parent device with SUBSYSTEMS=pci and the
+      # longest DEVPATH to which block device is connected.
+      # For the example given above, vendor ID should be found as '0x10b5'.
+      # Next ID of '0x8086' belongs to PCI slot to which PCIe RAID disk adapter is inserted.
+      devpath, device_info = udevadm_walk.find { |devpath, device_info| device_info["SUBSYSTEMS"] == 'pci' }
+      device_info['ATTRS{vendor}']
+    end
+  rescue => e
+    @logger.error("Error '#{e.message}' in obtaining PCI vendor ID: #{e.backtrace}")
   end
 
   def _disk_id_by_name(name)
