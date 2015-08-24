@@ -46,6 +46,10 @@ STORAGE_CODES = [3, 8, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109,
 REMOVABLE_VENDORS = [
   "Adaptec", "IBM", "ServeRA",
 ]
+# Add PCI vendor ID for Adaptec
+REMOVABLE_PCI_VENDORS = [
+  "0x1044", "0x9004", "0x9005",
+]
 
 def digest(body)
   if body.is_a? Hash
@@ -357,7 +361,12 @@ class NodeAgent
             @logger.debug("Block device seems to be physical data storage: #{bname}")
             block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
             if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
-              next
+              pci_vendor_id = _get_pci_vendor_id(bname)
+              @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
+              if ! REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
+                next
+              end
+              @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
             dname = bname.gsub(/!/, '/')
 
@@ -383,6 +392,28 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def _get_pci_vendor_id(devname)
+    Timeout::timeout(30) do
+      udevadm_walk = {}
+      device = nil
+      `udevadm info --attribute-walk --name=#{devname}`.split("\n").each do |line|
+        line.strip!
+        next unless line.start_with? 'looking', 'KERNEL', 'SUBSYSTEM', 'DRIVER', 'ATTR'
+        if line.start_with? 'looking'
+          device = line.split("'")[1]
+          udevadm_walk[device] = {}
+        else
+          key, value = line.split("==").each {|a| a.strip!}
+          udevadm_walk[device][key] = value.chomp('"').reverse.chomp('"').reverse
+        end
+      end
+      device, device_info = udevadm_walk.sort.reverse.find {|device, device_info| device_info["SUBSYSTEMS"] == 'pci' }
+      device_info['ATTRS{vendor}']
+    end
+  rescue Exception => e
+    @logger.error("Error '#{e.message}' in obtaining PCI vendor ID: #{e.backtrace}")
   end
 
   def _disk_id_by_name(name)
