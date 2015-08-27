@@ -1,3 +1,9 @@
+nailgun-agent (7.0.0-2) trusty; urgency=low
+
+  * Add timeout to cronjob to fix LP#1489315
+
+ -- Alexander Didenko <adidenko@mirantis.com>  Thu, 27 Aug 2015 19:58:00 +0300
+
 nailgun-agent (7.0.0-1) trusty; urgency=low
 
   * Update version to 7.0.0
