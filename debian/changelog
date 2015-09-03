@@ -1,3 +1,9 @@
+nailgun-agent (8.0.0-1) trusty; urgency=low
+
+  * Change version to 8.0.0
+
+ -- Vladimir Kozhukalov <vkozhukalov@mirantis.com>  Mon, 03 Sep 2015 11:18:00 +0300
+
 nailgun-agent (7.0.0-1) trusty; urgency=low
 
   * Update version to 7.0.0
