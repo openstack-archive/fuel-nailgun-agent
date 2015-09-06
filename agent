@@ -278,7 +278,27 @@ class NodeAgent
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
           if (addrinfo[:family] rescue nil) =~ /lladdr/
-            int_meta[:mac] = addr
+            begin
+                logger.info("Trying to get original physical address for #{int}")
+                permanent_physical_address = `ethtool -P #{int}`.split(': ')[1].chop.upcase
+            rescue
+                logger.warn("Failed to get original physical address for #{int}")
+                logger.warn("Continuing silently")
+            end
+            if permanent_physical_address.to_s =~ /^([0-9A-F]{2}[:-]){5}([0-9A-F]{2})$/i
+                if permanent_physical_address.upcase != int_meta[:mac].to_s.chop.upcase
+                    @logger.info("It seems that original mac address for interface #{int} was altered")
+                    @logger.info("Storing original mac #{permanent_physical_address} address instead of #{addr}")
+                    int_meta[:mac] = permanent_physical_address
+                elsif permanent_physical_address.upcase == int_meta[:mac].to_s.chop.upcase
+                    int_meta[:mac] = addr
+                end
+            else
+                @logger.warn ("Failed to get original MAC address for the interface
+                              - ethtool returned unexpected output (not '<string>: <mac>')")
+                int_meta[:mac] = addr
+            end
+
             int_meta[:pxe] = admin_mac == int_meta[:mac]
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
