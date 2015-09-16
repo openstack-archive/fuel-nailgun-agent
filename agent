@@ -278,7 +278,14 @@ class NodeAgent
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
           if (addrinfo[:family] rescue nil) =~ /lladdr/
-            int_meta[:mac] = addr
+            # Get original mac excluding case with empty EEPROM data
+            perm_addr = `ethtool -P #{int}`
+            if RUBY_VERSION >= '1.9.2'
+              re = /(?<=Permanent address: )(?!00(:00){5}).+/
+            else
+              re = perm_addr.match(/(00(:00){5})+/).nil? ? /\d+(:\d+){5}$/ : nil
+            end
+            int_meta[:mac] = perm_addr.match(re)[0] rescue addr
             int_meta[:pxe] = admin_mac == int_meta[:mac]
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
