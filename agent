@@ -278,7 +278,8 @@ class NodeAgent
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
           if (addrinfo[:family] rescue nil) =~ /lladdr/
-            int_meta[:mac] = addr
+            # Get original mac excluding case with empty EEPROM data
+            int_meta[:mac] = `ethtool -P #{int}`.match(/(?<=Permanent address: )(?!00(:00){5}).+/)[0] rescue addr
             int_meta[:pxe] = admin_mac == int_meta[:mac]
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
