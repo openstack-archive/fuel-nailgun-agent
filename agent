@@ -21,7 +21,7 @@ end
 require 'ohai/system'
 require 'json'
 require 'httpclient'
-require 'logger'
+require 'syslog-logger'
 require 'optparse'
 require 'yaml'
 require 'ipaddr'
@@ -700,7 +700,7 @@ def write_data_to_file(logger, filename, data)
   end
 end
 
-logger = Logger.new(STDOUT)
+logger = Logger::Syslog.new 'nailgun-agent'
 
 if File.exist?('/etc/nailgun_uid')
   logger.level = Logger::INFO
