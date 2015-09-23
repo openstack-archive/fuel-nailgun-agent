@@ -620,9 +620,7 @@ class NodeAgent
     info
   end
 
-
-
-  def _master_ip_and_mac
+  def _get_ip_mac_pair_for(local_addr)
     @os[:network][:interfaces].each do |_, intinfo|
       next unless intinfo.has_key?(:addresses)
       intinfo[:addresses].each do |k, v|
@@ -631,7 +629,7 @@ class NodeAgent
         # https://bugs.launchpad.net/fuel/+bug/1284571
         if v[:family] == 'inet' && !(IPAddr.new(k) rescue nil).nil?
           net = IPAddr.new("#{k}/#{v[:netmask]}")
-          if net.include? @api_ip
+          if net.include? local_addr
             mac = intinfo[:addresses].find { |_, info| info[:family] == 'lladdr' }[0]
             return {:ip => k, :mac => mac}
           end
@@ -639,6 +637,26 @@ class NodeAgent
       end
     end
     {}
+  end
+
+  def _master_ip_and_mac_for_multirack
+    rv = {}
+    if File.exist?('/etc/astute.yaml')
+      conf = YAML::load_file('/etc/astute.yaml')
+      return {} unless conf.is_a?(Hash)
+      e_point_name = conf.fetch('network_scheme', {}).fetch('roles', {}).fetch('admin/pxe', nil)
+      e_point_ips = conf.fetch('network_scheme', {}).fetch('endpoints', {}).fetch(e_point_name, {}).fetch('IP', [])
+      e_point_ips.each do |admin_ip|
+        rv = _get_ip_mac_pair_for(admin_ip)
+        break unless rv.empty?
+      end
+    end
+    return rv
+  end
+
+  def _master_ip_and_mac
+    rv = _get_ip_mac_pair_for(@api_ip)
+    return (rv.empty?  ?  _master_ip_and_mac_for_multirack  :  rv)
   end
 
   def _data
