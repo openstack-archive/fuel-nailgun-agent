@@ -4,7 +4,7 @@
 
 Name:      %{name}
 Version:   %{version}
-Release:   %{release}
+Release:   %{release}~mos8.0.1
 Source0:   fuel-%{name}-%{version}.tar.gz
 Summary:   Nailgun startup agent
 URL:       http://mirantis.com
