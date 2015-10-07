@@ -266,13 +266,19 @@ class NodeAgent
 
     admin_mac = (_master_ip_and_mac[:mac] or @os[:macaddress]) rescue nil
     begin
+      ethx_counter = 0
       (@os[:network][:interfaces] or {} rescue {}).each do |int, intinfo|
         # Send info about physical interfaces only
-        next if intinfo[:type] !~ /^eth.*/
+        #next if intinfo[:type] !~ /^eth.*/
         # Exception: eth0.0(example) have "type" => "eth" but it is not physical interface
-        next if int =~ /\d+\.\d+$/ or int =~ /vlan\d+$/
+        #next if int =~ /\d+\.\d+$/ or int =~ /vlan\d+$/
         # Remove interfaces like eth0.101-hapr, eth1-hapr
-        next if int =~ /\d+-.+/
+        #next if int =~ /\d+-.+/
+        next if int =~ /^lo.*/
+
+        int_meta = {:orig_name => int}
+        int_meta[:name] = "eth#{int_counter}"
+        int_counter += 1
 
         int_meta = {:name => int}
         int_meta[:state] = intinfo[:state]
@@ -325,6 +331,7 @@ class NodeAgent
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
         end
+        puts int_meta.inspect
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
