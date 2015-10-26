@@ -42,7 +42,7 @@ AGENT_CONFIG = "/etc/nailgun-agent/config.yaml"
 # KVM virtio volumes has code 252 in CentOS, but 253 in Ubuntu
 # Please also update the device codes here
 # https://github.com/stackforge/fuel-astute/blob/master/mcagents/erase_node.rb#L81
-STORAGE_CODES = [3, 8, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109, 110, 111, 202, 252, 253]
+STORAGE_CODES = [3, 8, 9, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109, 110, 111, 202, 252, 253]
 REMOVABLE_VENDORS = [
   "Adaptec", "IBM", "ServeRA",
 ]
@@ -150,6 +150,7 @@ class NodeAgent
         @logger.info("Can't get API url from /proc/cmdline. Will use localhost.")
         @api_ip = "127.0.0.1"
       end
+      #TODO: parse fuel_soft_raid cmdline option
       begin
         res = htclient.get("https://#{@api_ip}:#{@api_default_port}/")
         @scheme = "https"
@@ -506,7 +507,7 @@ class NodeAgent
       if STORAGE_CODES.include?(properties['MAJOR'].to_i)
         @logger.debug("Device #{devname} seems to be appropriate")
         # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
-        unless properties['DEVPATH'].include?('virtual')
+        unless properties['DEVPATH'].include?('virtual/block/dm')
           @blocks << {
             :name => basename_dir,
             :disk => _disk_path_by_name(devname) || devname,
