@@ -37,6 +37,7 @@ end
 ENV['PATH'] = "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
 AGENT_CONFIG = "/etc/nailgun-agent/config.yaml"
+BOOTSTRAP_META = "/etc/bootstrap_meta.yaml"
 
 # look at https://github.com/torvalds/linux/blob/master/Documentation/devices.txt
 # KVM virtio volumes has code 252 in CentOS, but 253 in Ubuntu
@@ -557,11 +558,20 @@ class NodeAgent
     node_uuid && node_uuid.strip
   end
 
+  def bootstrap_uuid    
+    bm = YAML.load_file(BOOTSTRAP_META) if File.exist?(BOOTSTRAP_META)    
+    bm['uuid'] if bm.has_key? uuid 
+  rescue
+    nil
+  end
+
+
   def _system_info
     {
       :manufacturer => _manufacturer,
       :serial => _serial,
       :uuid => uuid,
+      :bootstrap_uuid => bootstrap_uuid,
       :product => _product_name,
       :family => (@os[:dmi][:system][:family].strip rescue nil),
       :version => (@os[:dmi][:system][:version].strip rescue nil),
