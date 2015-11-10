@@ -138,8 +138,8 @@ class NodeAgent
 
   def initialize(logger)
     @logger = logger
-    settings = get_settings()
-    @api_ip = URI(settings['url']).host or API_DEFAULT_ADDRESS
+    @settings = get_settings()
+    @api_ip = URI(@settings['url']).host or API_DEFAULT_ADDRESS
 
     scheme, api_port = get_scheme_and_port()
 
@@ -578,6 +578,7 @@ class NodeAgent
       :manufacturer => _manufacturer,
       :serial => _serial,
       :uuid => uuid,
+      :runtime_uuid => @settings['runtime_uuid'],
       :product => _product_name,
       :family => (@os[:dmi][:system][:family].strip rescue nil),
       :version => (@os[:dmi][:system][:version].strip rescue nil),
