@@ -268,11 +268,13 @@ class NodeAgent
     begin
       (@os[:network][:interfaces] or {} rescue {}).each do |int, intinfo|
         # Send info about physical interfaces only
-        next if intinfo[:type] !~ /^eth.*/
-        # Exception: eth0.0(example) have "type" => "eth" but it is not physical interface
-        next if int =~ /\d+\.\d+$/ or int =~ /vlan\d+$/
-        # Remove interfaces like eth0.101-hapr, eth1-hapr
-        next if int =~ /\d+-.+/
+
+        next if intinfo[:encapsulation] !~ /^Ethernet.*/
+        # Avoid virtual devices like loopback, tunnels, bonding, vlans ...
+        next if File.realpath("/sys/class/net/#{int}") =~ /virtual/
+        # Avoid wireless
+        next if File.exist?("/sys/class/net/#{int}/phy80211") ||
+                File.exist?("/sys/class/net/#{int}/wireless")
 
         int_meta = {:name => int}
         int_meta[:state] = intinfo[:state]
