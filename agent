@@ -28,6 +28,7 @@ require 'ipaddr'
 require 'rethtool'
 require 'digest'
 require 'timeout'
+require 'uri'
 # TODO(vsharshov): replace below lines by this string after excluding Ruby 1.8
 require 'pathname'
 
@@ -131,41 +132,50 @@ class Offloading
 end
 
 class NodeAgent
-  def initialize(logger, url=nil)
+  API_DEFAULT_ADDRESS = "localhost"
+  API_DEFAULT_PORT = "8443"
+  API_LEGACY_PORT = "8000"
+
+  def initialize(logger)
     @logger = logger
+    settings = get_settings()
+    @api_ip = URI(settings['url']).host or API_DEFAULT_ADDRESS
 
-    @api_default_address = "localhost"
-    @api_default_port = "8443"
-    @api_legacy_port = "8000"
+    scheme, api_port = get_scheme_and_port()
 
-    @api_url = url
-
-    if @api_url
-      @api_url.chomp!('/')
-      @api_ip = @api_url.match(/\bhttp:\/\/((\d{1,3}\.){3}\d{1,3})/)[1]
-    else
-      begin
-        cmdline = ::File.read("/proc/cmdline")
-        @api_ip = cmdline.match(/\burl=http:\/\/((\d{1,3}\.){3}\d{1,3})/)[1]
-        @logger.info("Found admin node IP address in kernel cmdline: #{@api_ip}")
-      rescue
-        @logger.info("Can't get API url from /proc/cmdline. Will use localhost.")
-        @api_ip = "127.0.0.1"
-      end
-      begin
-        res = htclient.get("https://#{@api_ip}:#{@api_default_port}/")
-        @scheme = "https"
-        @api_port = @api_default_port
-      rescue Errno::ECONNREFUSED
-        @logger.warn("Connection Refused catched when trying connect to HTTPS port. Use plain HTTP")
-        @scheme = "http"
-        @api_port = @api_legacy_port
-      end
-      @api_url = "#{@scheme}://#{@api_ip}:#{@api_port}/api"
-    end
-
+    @api_url = "#{scheme}://#{@api_ip}:#{api_port}/api"
     @logger.info("API URL is #{@api_url}")
     @os = ohai_system_info
+  end
+
+  def get_scheme_and_port
+    scheme, api_port = nil
+    begin
+      res = htclient.get("https://#{@api_ip}:#{API_DEFAULT_PORT}/")
+      scheme, api_port = "https", API_DEFAULT_PORT
+    rescue Errno::ECONNREFUSED
+      @logger.warn("Connection Refused catched when trying connect to HTTPS port. Use plain HTTP")
+      scheme, api_port = "http", API_LEGACY_PORT
+    end
+    return scheme, api_port
+  end
+
+  # transform string into Dictionary
+  # For example, line: "initrd=/images/bootstrap/initramfs.img ksdevice=bootif lang="
+  # will be transformed into: {"mco_user"=>"mcollective", "initrd"=>"/images/bootstrap/initramfs.img", "lang"=>nil}
+  def string_to_hash(string)
+    hash = Hash.new
+    string.split(' ').each do |pair|
+      key,value = pair.split(/=/, 2)
+      hash[key] = value
+    end
+    hash
+  end
+
+  def get_settings
+    agent_settings = YAML.load_file(AGENT_CONFIG) rescue {}
+    cmdline_settings = string_to_hash(File.read("/proc/cmdline")) rescue {}
+    agent_settings.merge(cmdline_settings)
   end
 
   def ohai_system_info
@@ -750,15 +760,7 @@ if File.exist?('/etc/nailgun-agent/nodiscover')
   exit 1
 end
 
-begin
-  logger.info("Trying to load agent config #{AGENT_CONFIG}")
-  url = YAML.load_file(AGENT_CONFIG)['url']
-  logger.info("Obtained service url from config file: '#{url}'")
-rescue Exception => e
-  logger.info("Could not get url from configuration file: #{e.message}, trying other ways..")
-end
-
-agent = NodeAgent.new(logger, url)
+agent = NodeAgent.new(logger)
 agent.update_state
 
 begin
