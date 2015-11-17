@@ -503,6 +503,17 @@ class NodeAgent
       end
       @logger.debug("Device #{devname} udev properties: #{properties.inspect}")
 
+      devlinks = []
+      if properties['DEVLINKS']
+        begin
+          devlinks = properties['DEVLINKS'].split()
+          @logger.debug("Device #{devname} has DEVLINKS: #{devlinks}")
+        rescue => ex
+          @logger.debug("Device #{devname} DEVLINKS #{properties['DEVLINKS']} can't be split")
+      end
+
+      end
+
       @logger.debug("Trying to find out if device #{devname} is removable or not")
       if File.exists?("/sys/block/#{basename_dir}/removable")
         removable = File.open("/sys/block/#{basename_dir}/removable"){ |f| f.read_nonblock(1024).strip }
@@ -516,7 +527,10 @@ class NodeAgent
           @blocks << {
             :name => basename_dir,
             :disk => _disk_path_by_name(devname) || devname,
-            :extra => _disk_id_by_name(devname) || [],
+            :extra => {
+                :ids => _disk_id_by_name(devname) || [],
+                :DEVLINKS => devlinks
+            },
             :removable => removable,
           }
         end
