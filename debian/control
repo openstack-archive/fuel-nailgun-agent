@@ -11,6 +11,7 @@ Vcs-Browser: https://github.com/stackforge/fuel-nailgun-agent
 Package: nailgun-agent
 Architecture: all
 XB-Ruby-Versions: ${ruby:Versions}
+Recommends: lshw
 Depends: ohai (<< 7),
          dmidecode,
          ethtool,
