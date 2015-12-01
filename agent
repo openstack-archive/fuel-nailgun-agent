@@ -274,6 +274,7 @@ class NodeAgent
       },
       :disks => [],
       :memory => (_dmi_memory or _ohai_memory),
+      :pci_devices => _get_pci_dev_list,
     }
 
     admin_mac = (_master_ip_and_mac[:mac] or @os[:macaddress]) rescue nil
@@ -707,6 +708,18 @@ class NodeAgent
     res[:is_agent] = true
     res[:agent_checksum] = createsig(res)
     res
+  end
+
+  def _get_pci_dev_list
+    data = `/usr/bin/lshw -json`
+    exitstatus = $?
+    if exitstatus == 0
+      return JSON.parse(data)
+    else
+      @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{exitstatus}")
+    end
+  rescue Exception => e
+    @logger.warn("Can't get data from lshw. Reason: #{e.message}")
   end
 
   def update_state
