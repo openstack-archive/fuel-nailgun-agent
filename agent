@@ -792,10 +792,10 @@ class NodeAgent
     lshw_path = `which lshw`.chomp
     exitstatus = $?
     if exitstatus == 0
-      data = `#{lshw_path} -json`
+      data = `#{lshw_path} -xml`
       exitstatus = $?
       if exitstatus == 0
-        return JSON.parse(data)
+        return data
       else
         @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{exitstatus}")
       end
