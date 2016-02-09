@@ -40,13 +40,6 @@ end
 ENV['PATH'] = "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
 AGENT_CONFIG = "/etc/nailgun-agent/config.yaml"
-
-# look at https://github.com/torvalds/linux/blob/master/Documentation/devices.txt
-# KVM virtio volumes has code 252 in CentOS, but 253 in Ubuntu
-# Please also update the device codes here
-# https://github.com/stackforge/fuel-astute/blob/master/mcagents/erase_node.rb#L81
-# NVMe has code 259
-STORAGE_CODES = [3, 8, 9, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109, 110, 111, 202, 252, 253, 259]
 REMOVABLE_VENDORS = [
   "Adaptec", "IBM", "ServeRA",
 ]
@@ -273,7 +266,10 @@ class NodeAgent
         :real => (@os[:cpu][:real].to_i rescue nil),
         :spec => [],
       },
-      :disks => [],
+      :disks => {
+          :blocks => [],
+          :dmsetup_info => {},
+      },
       :memory => (_dmi_memory or _ohai_memory),
       :pci_devices => _get_pci_dev_list,
     }
@@ -379,38 +375,44 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+        dmsetup_output = `dmsetup info -c --nameprefixes --noheadings --rows -o name,uuid,blkdevs_used,subsystem,lv_name,blkdevname`
+        unless dmsetup_output.include? "No devices found"
+          detailed_meta[:disks][:dmsetup_info] = _parse_data(dmsetup_output)
+        end
+        mds, devices = _find_fake_raid_mds()
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
-          if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
-            @logger.debug("Block device seems to be physical data storage: #{bname}")
-            block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
-            if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
-              pci_vendor_id = _get_pci_vendor_id(bname)
-              @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
-              unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
-                next
-              end
-              @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
-            end
-            dname = bname.gsub(/!/, '/')
-
-            # ohai reports the disk size according to /sys/block/#{bname}
-            # which is always measured in 512 bytes blocks, no matter what
-            # the physical (minimal unit which can be atomically written)
-            # or logical (minimal # unit which can be addressed) block sizes are, see
-            # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
-            # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
-            block_size = 512
-            detailed_meta[:disks] << {
-              :name => dname,
-              :model => binfo[:model],
-              :size => (binfo[:size].to_i * block_size),
-              :disk => block[:disk],
-              :extra => block[:extra],
-              :removable => block[:removable]
-            }
+          next if devices.include?("/dev/#{bname}")
+          next if devname.start_with?('md') and not mds.include?(bname)
+          dname = bname.gsub(/!/, '/')
+          @logger.debug("Trying to find out if device #{dname} is removable or not")
+          if File.exists?("/sys/block/#{bname}/removable")
+            removable = File.open("/sys/block/#{bname}/removable"){ |f| f.read_nonblock(1024).strip }
           end
+          if removable =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
+            pci_vendor_id = _get_pci_vendor_id(bname)
+            @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
+            unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
+              next
+            end
+            @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
+          end
+
+          # ohai reports the disk size according to /sys/block/#{bname}
+          # which is always measured in 512 bytes blocks, no matter what
+          # the physical (minimal unit which can be atomically written)
+          # or logical (minimal # unit which can be addressed) block sizes are, see
+          # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
+          # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
+          block_size = 512
+          udev_output = `udevadm info --query=property --name=#{bname}`
+          detailed_meta[:disks][:blocks] << {
+            :size => (binfo[:size].to_i * block_size),
+            :udev_info => _parse_data(udev_output),
+            :removable => removable
+          }
+
         end
         @logger.debug("Detailed meta disks: #{detailed_meta[:disks].inspect}")
       end
@@ -419,6 +421,15 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def _parse_data(output)
+    disk = {}
+    (output.lines).each do |line|
+        key, value= line.split(/=/, 2)
+        disk[key] = value.strip().sub(/"/, '')
+    end
+    return disk
   end
 
   def _get_pci_vendor_id(devname)
@@ -481,18 +492,6 @@ class NodeAgent
     end
   rescue => e
     @logger.error("Error '#{e.message}' in obtaining PCI vendor ID: #{e.backtrace}")
-  end
-
-  def _disk_id_by_name(name)
-    dn = "/dev/disk/by-id"
-    basepath = Dir["#{dn}/**?"].select{|f| /\/#{name}$/.match(File.readlink(f))}
-    basepath.map{|p| p.split("/")[2..-1].join("/")}
-  end
-
-  def _disk_path_by_name(name)
-    dn = "/dev/disk/by-path"
-    basepath = Dir["#{dn}/**?"].find{|f| /\/#{name}$/.match(File.readlink(f))}
-    basepath.split("/")[2..-1].join("/") if basepath
   end
 
   # Sample mdadm --detail /dev/md127 output:
@@ -563,58 +562,6 @@ class NodeAgent
       @logger.error("Error '#{e.message}' in finding fake raid MDs: #{e.backtrace}")
     end
     return mds, devices
-  end
-
-  def physical_data_storage_devices
-    @blocks ||= []
-    return @blocks unless @blocks.empty?
-
-    @logger.debug("Trying to get list of physical devices")
-    raise "Path /sys/block does not exist" unless File.exists?("/sys/block")
-
-    mds, devices = _find_fake_raid_mds()
-
-    Dir["/sys/block/*"].each do |block_device_dir|
-      basename_dir = File.basename(block_device_dir)
-      # Entries in /sys/block for cciss look like cciss!c0d1 while
-      # the entries in /dev look like /dev/cciss/c0d1. udevadm uses
-      # the entry in /dev so we need to replace the ! to get a valid
-      # device name.
-      devname = basename_dir.gsub(/!/, '/')
-
-      # Skipping MD if it's a container. Also skipping underlying
-      # devices from which that container is composed.
-      next if devices.include?("/dev/#{devname}")
-      next if devname.start_with?('md') and not mds.include?(devname)
-
-      @logger.debug("Getting udev properties for device: #{devname}")
-      properties = `udevadm info --query=property --export --name=#{devname}`.split("\n").inject({}) do |result, raw_propety|
-       key, value = raw_propety.split(/\=/)
-       result.update(key.strip => value.strip.chomp("'").reverse.chomp("'").reverse)
-      end
-      @logger.debug("Device #{devname} udev properties: #{properties.inspect}")
-
-      @logger.debug("Trying to find out if device #{devname} is removable or not")
-      if File.exists?("/sys/block/#{basename_dir}/removable")
-        removable = File.open("/sys/block/#{basename_dir}/removable"){ |f| f.read_nonblock(1024).strip }
-      end
-      @logger.debug("Device #{devname} removable parameter: #{removable.inspect}")
-
-      if STORAGE_CODES.include?(properties['MAJOR'].to_i)
-        @logger.debug("Device #{devname} seems to be appropriate")
-        # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
-        unless properties['DEVPATH'].include?('virtual/block/dm')
-          @blocks << {
-            :name => basename_dir,
-            :disk => _disk_path_by_name(devname) || devname,
-            :extra => _disk_id_by_name(devname) || [],
-            :removable => removable,
-          }
-        end
-      end
-    end
-    @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
-    @blocks
   end
 
   def _is_virtualbox
