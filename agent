@@ -41,20 +41,6 @@ ENV['PATH'] = "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
 AGENT_CONFIG = "/etc/nailgun-agent/config.yaml"
 
-# look at https://github.com/torvalds/linux/blob/master/Documentation/devices.txt
-# KVM virtio volumes has code 252 in CentOS, but 253 in Ubuntu
-# Please also update the device codes here
-# https://github.com/stackforge/fuel-astute/blob/master/mcagents/erase_node.rb#L81
-# NVMe has code 259
-STORAGE_CODES = [3, 8, 9, 65, 66, 67, 68, 69, 70, 71, 104, 105, 106, 107, 108, 109, 110, 111, 202, 252, 253, 259]
-REMOVABLE_VENDORS = [
-  "Adaptec", "IBM", "ServeRA",
-]
-# PCI vendor IDs for Adaptec
-REMOVABLE_PCI_VENDORS = [
-  "0x1044", "0x9004", "0x9005",
-]
-
 def digest(body)
   if body.is_a? Hash
     digest body.map { |k,v| [digest(k),digest(v)].join("=>") }.sort
@@ -273,7 +259,7 @@ class NodeAgent
         :real => (@os[:cpu][:real].to_i rescue nil),
         :spec => [],
       },
-      :disks => [],
+      :disks => {},
       :memory => (_dmi_memory or _ohai_memory),
       :pci_devices => _get_pci_dev_list,
     }
@@ -379,38 +365,17 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+          #dmsetup_output = ``
+        disks = detailed_meta[:disks]
+        dmsetup = _dictify_output("dmsetup info -c --nameprefixes --noheadings --rows -o name,uuid,blkdevs_used,subsystem,lv_name,blkdevname")
+        disks.merge!(dmestup)
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
-          @logger.debug("Found block device: #{bname}")
-          @logger.debug("Block device info: #{binfo.inspect}")
-          if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
-            @logger.debug("Block device seems to be physical data storage: #{bname}")
-            block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
-            if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
-              pci_vendor_id = _get_pci_vendor_id(bname)
-              @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
-              unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
-                next
-              end
-              @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
-            end
             dname = bname.gsub(/!/, '/')
-
-            # ohai reports the disk size according to /sys/block/#{bname}
-            # which is always measured in 512 bytes blocks, no matter what
-            # the physical (minimal unit which can be atomically written)
-            # or logical (minimal # unit which can be addressed) block sizes are, see
-            # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
-            # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
-            block_size = 512
-            detailed_meta[:disks] << {
-              :name => dname,
-              :model => binfo[:model],
-              :size => (binfo[:size].to_i * block_size),
-              :disk => block[:disk],
-              :extra => block[:extra],
-              :removable => block[:removable]
-            }
-          end
+            disks.merge!(_dictify_output("mdadm -Y --detail /dev/#{dname}"))
+            disks.merge!(_dictify_output("udevadm info --attribute-walk --name=#{dname}"))
+            disks.merge!(_dictify_output("cat /sys/block/${dname}/removable"))
+            disks.merge!(_dictify_output("blockdev --getsize64 /dev/${dname}"))
+            disks.merge!(_dictify_output("udevadm info --query=property --name=#{dname}"))
         end
         @logger.debug("Detailed meta disks: #{detailed_meta[:disks].inspect}")
       end
@@ -421,200 +386,13 @@ class NodeAgent
     detailed_meta
   end
 
-  def _get_pci_vendor_id(devname)
-    Timeout::timeout(30) do
-      udevadm_walk = {}
-      devpath = nil
-      # expected output of `udevadm info --attribute-walk --name=#{devname}`:
-      #
-      #  Udevadm info starts with the device specified by the devpath and then
-      #  walks up the chain of parent devices. It prints for every device
-      #  found, all possible attributes in the udev rules key format.
-      #  A rule to match, can be composed by the attributes of the device
-      #  and the attributes from one single parent device.
-      #
-      #    looking at device '/devices/pci0000:00/0000:00:1e.0/0000:0d:02.0/8:0:0:1/block/sdc':
-      #      KERNEL=="sdc"
-      #      SUBSYSTEM=="block"
-      #      DRIVER==""
-      #      ATTR{ro}=="0"
-      #      ATTR{size}=="30881792"
-      #      ATTR{removable}=="1"
-      #
-      #    looking at parent device '/devices/pci0000:00/0000:00:1e.0/0000:0d:02.0':
-      # Disk adapter plugged into PCIe slot, we need it's PCI vendor ID
-      #      KERNELS=="0000:0d:02.0"
-      #      SUBSYSTEMS=="pci"
-      #      DRIVERS==""
-      #      ATTRS{device}=="0x9030"
-      #      ATTRS{vendor}=="0x10b5"
-      #
-      #    looking at parent device '/devices/pci0000:00/0000:00:1e.0':
-      # PCIe slot reported as a PCI bridge device, it's PCI vendor ID is NOT what we need
-      #      KERNELS=="0000:00:1e.0"
-      #      SUBSYSTEMS=="pci"
-      #      DRIVERS==""
-      #      ATTRS{device}=="0x244e"
-      #      ATTRS{vendor}=="0x8086"
-      #
-      #    looking at parent device '/devices/pci0000:00':
-      #      KERNELS=="pci0000:00"
-      #      SUBSYSTEMS==""
-      #      DRIVERS==""
-      `udevadm info --attribute-walk --name=#{devname}`.split("\n").each do |line|
-        line.strip!
-        next unless line.start_with?('looking', 'KERNEL', 'SUBSYSTEM', 'DRIVER', 'ATTR')
-        if line.start_with?('looking')
-          devpath = line.split("'")[1]
-          udevadm_walk[devpath] = {}
-        else
-          key, value = line.split("==").each { |a| a.strip! }
-          udevadm_walk[devpath][key] = value.gsub(/(^")|("$)/, '')
-        end
-      end
-      # We need a vendor ID of a disk adapter rather than vendor ID of the PCIe slot where it's plugged into.
-      # Therefore we should pick the device with SUBSYSTEMS==pci having the longest devpath.
-      # For the example given above, vendor ID should be found as '0x10b5'.
-      # Next ID of '0x8086' belongs to PCIe slot to which PCIe RAID disk adapter is inserted.
-      devpath = Hash[udevadm_walk.select { |k, v| v['SUBSYSTEMS'] == 'pci' }].keys.max
-      udevadm_walk[devpath]['ATTRS{vendor}']
-    end
-  rescue => e
-    @logger.error("Error '#{e.message}' in obtaining PCI vendor ID: #{e.backtrace}")
-  end
-
-  def _disk_id_by_name(name)
-    dn = "/dev/disk/by-id"
-    basepath = Dir["#{dn}/**?"].select{|f| /\/#{name}$/.match(File.readlink(f))}
-    basepath.map{|p| p.split("/")[2..-1].join("/")}
-  end
-
-  def _disk_path_by_name(name)
-    dn = "/dev/disk/by-path"
-    basepath = Dir["#{dn}/**?"].find{|f| /\/#{name}$/.match(File.readlink(f))}
-    basepath.split("/")[2..-1].join("/") if basepath
-  end
-
-  # Sample mdadm --detail /dev/md127 output:
-  # /dev/md127:
-  #         Version : 1.2
-  #   Creation Time : Thu Oct 29 16:12:00 2015
-  #      Raid Level : raid1
-  #      Array Size : 1048000 (1023.61 MiB 1073.15 MB)
-  #   Used Dev Size : 1048000 (1023.61 MiB 1073.15 MB)
-  #    Raid Devices : 2
-  #   Total Devices : 2
-  #     Persistence : Superblock is persistent
-  #
-  #     Update Time : Sun Nov  1 00:57:31 2015
-  #           State : clean
-  #  Active Devices : 2
-  # Working Devices : 2
-  #  Failed Devices : 0
-  #   Spare Devices : 0
-  #
-  #            Name : agordeev:123  (local to host agordeev)
-  #            UUID : 7aa70afc:742a9fa6:45f9f5a1:25a2585f
-  #          Events : 20
-  #
-  #     Number   Major   Minor   RaidDevice State
-  #        0     252        2        0      active sync   /dev/dm-2
-  #        1     252        3        1      active sync   /dev/dm-3
-  #
-  def _parse_md(data)
-    md = {}
-    begin
-      description, _, components = data.split(/Number\s+Major\s+Minor\s+RaidDevice\s+(State\s+)?/m)
-      line_patterns = ['Version', 'Raid Level', 'Raid Devices', 'Active Devices',
-                       'Spare Devices', 'Failed Devices', 'State', 'UUID']
-      for line in (description.split("\n")[1..-1] rescue [])
-        line.strip!
-        next if line == ""
-        line_patterns.each { |pattern| md[pattern] = line.split(" : ").last if line.start_with?(pattern) }
-      end
-      md['devices'] = []
-      for line in (components.split("\n") rescue [])
-        line.strip!
-        next if line == ""
-        md['devices'] << line.split().last
-      end
-    rescue Exception => e
-      @logger.error("Error '#{e.message}' in parsing MD: #{e.backtrace}")
-    end
-    md
-  end
-
-  def _find_fake_raid_mds()
-    mds = []
-    devices = []
-    begin
-      Dir["/sys/block/*"].each do |block_device_dir|
-        basename_dir = File.basename(block_device_dir)
-        devname = basename_dir.gsub(/!/, '/')
-        next unless devname.start_with?('md')
-        md_data = _parse_md(`mdadm --detail /dev/#{devname}`)
-        next if md_data['Raid Level'] == 'container'
-        if md_data.has_key?("Container")
-          devices.concat((md_data['devices'] or []))
-          mds << devname
-        end
-      end
-    rescue Exception => e
-      @logger.error("Error '#{e.message}' in finding fake raid MDs: #{e.backtrace}")
-    end
-    return mds, devices
-  end
-
-  def physical_data_storage_devices
-    @blocks ||= []
-    return @blocks unless @blocks.empty?
-
-    @logger.debug("Trying to get list of physical devices")
-    raise "Path /sys/block does not exist" unless File.exists?("/sys/block")
-
-    mds, devices = _find_fake_raid_mds()
-
-    Dir["/sys/block/*"].each do |block_device_dir|
-      basename_dir = File.basename(block_device_dir)
-      # Entries in /sys/block for cciss look like cciss!c0d1 while
-      # the entries in /dev look like /dev/cciss/c0d1. udevadm uses
-      # the entry in /dev so we need to replace the ! to get a valid
-      # device name.
-      devname = basename_dir.gsub(/!/, '/')
-
-      # Skipping MD if it's a container. Also skipping underlying
-      # devices from which that container is composed.
-      next if devices.include?("/dev/#{devname}")
-      next if devname.start_with?('md') and not mds.include?(devname)
-
-      @logger.debug("Getting udev properties for device: #{devname}")
-      properties = `udevadm info --query=property --export --name=#{devname}`.split("\n").inject({}) do |result, raw_propety|
-       key, value = raw_propety.split(/\=/)
-       result.update(key.strip => value.strip.chomp("'").reverse.chomp("'").reverse)
-      end
-      @logger.debug("Device #{devname} udev properties: #{properties.inspect}")
-
-      @logger.debug("Trying to find out if device #{devname} is removable or not")
-      if File.exists?("/sys/block/#{basename_dir}/removable")
-        removable = File.open("/sys/block/#{basename_dir}/removable"){ |f| f.read_nonblock(1024).strip }
-      end
-      @logger.debug("Device #{devname} removable parameter: #{removable.inspect}")
-
-      if STORAGE_CODES.include?(properties['MAJOR'].to_i)
-        @logger.debug("Device #{devname} seems to be appropriate")
-        # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
-        unless properties['DEVPATH'].include?('virtual/block/dm')
-          @blocks << {
-            :name => basename_dir,
-            :disk => _disk_path_by_name(devname) || devname,
-            :extra => _disk_id_by_name(devname) || [],
-            :removable => removable,
-          }
-        end
-      end
-    end
-    @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
-    @blocks
+  def _dictify_output(cmd)
+      output = `#{cmd}`
+      exit_code = $?.to_i
+      return {"#{cmd}"=> {
+          :output => output,
+          :exit_code => exit_code
+      }}
   end
 
   def _is_virtualbox
