@@ -31,6 +31,8 @@ require 'timeout'
 require 'uri'
 # TODO(vsharshov): replace below lines by this string after excluding Ruby 1.8
 require 'pathname'
+require 'rexml/document'
+include REXML
 
 unless Process.euid == 0
   puts "You must be root"
@@ -276,6 +278,7 @@ class NodeAgent
       :disks => [],
       :memory => (_dmi_memory or _ohai_memory),
       :pci_devices => _get_pci_dev_list,
+      :numa_topology => numa_nodes,
     }
 
     admin_mac = (_master_ip_and_mac[:mac] or @os[:macaddress]) rescue nil
@@ -804,6 +807,47 @@ class NodeAgent
     end
   rescue => e
     @logger.warn("Can't get data from lshw. Reason: #{e.message}")
+  end
+
+  def numa_nodes
+    doc = Document.new `lstopo --no-caches --of xml`
+
+    topology = {:numa_nodes => [], :available_hugepages => available_hugepages, :distances => nil}
+
+    doc.elements.each('/topology/object/distances/') do |dist|
+      topology[:distances] = dist.elements.collect{|v| v.attributes['value']}
+        .each_slice(dist.attributes['nbobjs'].to_i).to_a
+    end
+
+    doc.elements.each(define_element(doc)) do |numa|
+
+      struct = {:id=> nil, :cpus => [], :memory => nil}
+      struct[:id] = numa.attributes['os_index']
+      struct[:memory] = numa.attributes['local_memory']
+
+      numa.elements.each("object/object/object[@type='PU']") do |pu|
+        struct[:cpus] << pu.attributes['os_index']
+      end
+        topology[:numa_nodes] << struct
+    end
+    topology
+  end
+
+  def define_element(doc)
+    @element = '/topology/object/'
+    @element = "/topology/object/object[@type='NUMANode']" if  doc.elements["/topology/object/object[@type='NUMANode']"]
+    @element
+  end
+
+  def available_hugepages
+    # Output EXAMPLE:
+    # Hugepagesize:       2048 kB
+    # DirectMap4k:      106412 kB
+    # DirectMap2M:     2932736 kB
+    # DirectMap1G:    14680064 kB
+
+    YAML.load(File.read('/proc/meminfo')).select{ |k| k.to_s =~ /DirectMap/}
+      .values.map{|v| v.gsub('kB', '').to_i }
   end
 
   def update_state
