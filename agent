@@ -395,11 +395,13 @@ class NodeAgent
             end
             dname = bname.gsub(/!/, '/')
 
-            # 512 bytes is the size of one sector by default
+            # ohai reports the disk size according to /sys/block/#{bname}
+            # which is always measured in 512 bytes blocks, no matter what
+            # the physical (minimal unit which can be atomically written)
+            # or logical (minimal # unit which can be addressed) block sizes are, see
+            # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
+            # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
             block_size = 512
-            fn = "/sys/block/#{bname}/queue/logical_block_size"
-            block_size = File.read(fn).to_i if File.exist? fn
-            block_size = 512 if block_size == 0
             detailed_meta[:disks] << {
               :name => dname,
               :model => binfo[:model],
