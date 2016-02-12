@@ -770,9 +770,13 @@ class NodeAgent
       :ip  => (@os[:ipaddress] rescue nil),
       :os_platform => (@os[:platform] rescue nil),
     }
+    master_data = _master_ip_and_mac
+    unless master_data[:mac] and master_data[:ip]
+      @logger.error("Unable to determine admin MAC and IP. Exiting.")
+      exit 1
+    end
     begin
       detailed_data = _detailed
-      master_data=_master_ip_and_mac
       res.merge!({
         :ip  => (( master_data[:ip] or @os[:ipaddress]) rescue nil),
         :mac  => (( master_data[:mac] or @os[:macaddress]) rescue nil),
