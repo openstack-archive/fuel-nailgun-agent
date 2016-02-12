@@ -646,7 +646,8 @@ class NodeAgent
       if STORAGE_CODES.include?(properties['MAJOR'].to_i)
         @logger.debug("Device #{devname} seems to be appropriate")
         # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
-        unless properties['DEVPATH'].include?('virtual/block/dm')
+        # Exclude any storage device connected through USB by the default
+        unless properties['DEVPATH'].include?('virtual/block/dm') || (!@settings.has_key?("report_usb_block_devices") && properties['ID_BUS'] == 'usb')
           @blocks << {
             :name => basename_dir,
             :disk => _disk_path_by_name(devname) || devname,
