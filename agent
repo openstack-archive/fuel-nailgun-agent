@@ -56,6 +56,12 @@ REMOVABLE_VENDORS = [
 REMOVABLE_PCI_VENDORS = [
   "0x1044", "0x9004", "0x9005",
 ]
+# Set default data structure for SR-IOV
+DEFAULT_SRIOV = {
+  "sriov_totalvfs" => 0,
+  "available"      => false,
+  "pci_id"         => ""
+}
 
 def digest(body)
   if body.is_a? Hash
@@ -267,6 +273,35 @@ class NodeAgent
     res << Offloading.new(current, _parse_offloading(inner))
   end
 
+  # Gets information about SR-IOV for specified pci slot
+  # using 'lspci' utility. Example of output to parse:
+  #  ...
+  #  Capabilities: [160 v1] Single Root I/O Virtualization (SR-IOV)
+  #          IOVCap: Migration-, Interrupt Message Number: 000
+  #          IOVCtl: Enable- Migration- Interrupt- MSE- ARIHierarchy-
+  #          IOVSta: Migration-
+  #          Initial VFs: 8, Total VFs: 8, Number of VFs: 0, Function Dependency Link: 01
+  #          VF offset: 128, stride: 4, Device ID: 1520
+  #          Supported Page Size: 00000553, System Page Size: 00000001
+  #          Region 0: Memory at 0000000090040000 (64-bit, prefetchable)
+  #          Region 3: Memory at 0000000090060000 (64-bit, prefetchable)
+  #          VF Migration: offset: 00000000, BIR: 0
+  #  ...
+  def sriov_info(int_bus_info)
+    sriov = DEFAULT_SRIOV
+    lspci = _get_lspci_info(int_bus_info)
+    if lspci.match(/.*Capabilities:.*SR-IOV.*/)
+      sriov["available"] = true
+      sriov["sriov_totalvfs"] = lspci.scan(/\s+Total\s+VFs:\s+(\d+)/).last.first.to_i - 1
+      vf_vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
+      vf_device = lspci.scan(/VF\s+.*\s+Device\s+ID:\s+(\d+)/).last.first
+      sriov["pci_id"] = "#{vf_vendor}:#{vf_device}"
+    end
+    sriov
+  rescue
+    DEFAULT_SRIOV
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -295,8 +330,10 @@ class NodeAgent
         # Avoid wireless
         next if File.exist?("/sys/class/net/#{int}/phy80211") ||
                 File.exist?("/sys/class/net/#{int}/wireless")
-
+        # Skip virtual functions
+        next if File.exists?("/sys/class/net/#{int}/device/physfn")
         int_meta = {:name => int}
+        int_meta[:interface_properties] = {}
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
           if (addrinfo[:family] rescue nil) =~ /lladdr/
@@ -354,6 +391,8 @@ class NodeAgent
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
         end
+        # Getting SR-IOV info
+        int_meta[:interface_properties][:sriov] = sriov_info(int_meta[:bus_info])
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
@@ -853,9 +892,28 @@ class NodeAgent
   end
 
   def supported_hugepages
-      return [2048, 1048576] if @os[:cpu]['0']['flags'].include?('pdpe1gb')
-      return [2048] if @os[:cpu]['0']['flags'].include?('pse')
-      []
+    return [2048, 1048576] if @os[:cpu]['0']['flags'].include?('pdpe1gb')
+    return [2048] if @os[:cpu]['0']['flags'].include?('pse')
+    []
+  end
+
+  def _get_lspci_info(device)
+    lspci_path = `which lspci`.chomp
+    if $?.success?
+      data = `#{lspci_path} -vvv -s #{device}`
+      if $?.success?
+        return data
+      else
+        @logger.warn("Can't get data from lspci. Reason: lspci exited with status #{$?.exitstatus}")
+        ""
+      end
+    else
+      @logger.warn("Can't find lspci. Reason: 'which lspci' returned exit status #{$?.exitstatus}")
+      ""
+    end
+  rescue => e
+    @logger.warn("Can't get data from lspci for #{device} slot. Reason: #{e.message}")
+    ""
   end
 
   def update_state
