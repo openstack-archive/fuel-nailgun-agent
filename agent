@@ -291,7 +291,8 @@ class NodeAgent
         # Avoid wireless
         next if File.exist?("/sys/class/net/#{int}/phy80211") ||
                 File.exist?("/sys/class/net/#{int}/wireless")
-
+        # Skip virtual functions
+        next if File.exists?("/sys/class/net/#{int}/device/physfn")
         int_meta = {:name => int}
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
@@ -349,6 +350,27 @@ class NodeAgent
           # in case if we have no `ethtool` package installed we should
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
+        end
+        # Getting SR-IOV info
+        sriov = {
+          "sriov_totalvfs" => 0,
+          "available"      => false,
+          "pci_id"         => ""
+        }
+        begin
+          if File.exist?("/sys/class/net/#{int}/device/sriov_totalvfs") and
+            File.readlink("/sys/class/net/#{int}/device/iommu_group") !=
+            File.readlink("/sys/class/net/#{int}/device/virtfn0/iommu_group")
+
+            sriov["available"] = true
+            sriov["sriov_totalvfs"] = File.read("/sys/class/net/#{int}/device/sriov_totalvfs").chomp.to_i
+            vf_vendor = File.read("/sys/class/net/#{int}/device/virtfn0/vendor").chomp.gsub(/^0x/, '')
+            vf_device = File.read("/sys/class/net/#{int}/device/virtfn0/device").chomp.gsub(/^0x/, '')
+            sriov["pci_id"] = "#{vf_vendor}:#{vf_device}"
+          end
+          int_meta[:sriov] = sriov
+        rescue
+          int_meta[:sriov] = sriov
         end
         detailed_meta[:interfaces] << int_meta
       end
