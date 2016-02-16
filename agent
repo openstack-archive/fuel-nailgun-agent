@@ -291,7 +291,8 @@ class NodeAgent
         # Avoid wireless
         next if File.exist?("/sys/class/net/#{int}/phy80211") ||
                 File.exist?("/sys/class/net/#{int}/wireless")
-
+        # Skip virtual functions
+        next if File.exists?("/sys/class/net/#{int}/device/physfn")
         int_meta = {:name => int}
         int_meta[:state] = intinfo[:state]
         (intinfo[:addresses] or {} rescue {}).each do |addr, addrinfo|
@@ -349,6 +350,25 @@ class NodeAgent
           # in case if we have no `ethtool` package installed we should
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
+        end
+        # Getting SR-IOV info
+        sriov = {
+          "sriov_totalvfs" => 0,
+          "available"      => false,
+          "pci_id"         => ""
+        }
+        begin
+          lspci = _get_lspci_info(int_meta[:bus_info])
+          if lspci.is_a?(String) and lspci.match(/.*Capabilities:.*SR-IOV.*/)
+            sriov["available"] = true
+            sriov["sriov_totalvfs"] = lspci.scan(/\s+Total\s+VFs:\s+(\d+)/).last.first.to_i - 1
+            vf_vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
+            vf_device = lspci.scan(/VF\s+.*\s+Device\s+ID:\s+(\d+)/).last.first
+            sriov["pci_id"] = "#{vf_vendor}:#{vf_device}"
+          end
+          int_meta[:sriov] = sriov
+        rescue
+          int_meta[:sriov] = sriov
         end
         detailed_meta[:interfaces] << int_meta
       end
@@ -806,6 +826,24 @@ class NodeAgent
     end
   rescue => e
     @logger.warn("Can't get data from lshw. Reason: #{e.message}")
+  end
+
+  def _get_lspci_info(device)
+    lspci_path = `which lspci`.chomp
+    exitstatus = $?
+    if exitstatus == 0
+      data = `#{lspci_path} -vvv -s #{device}`
+      exitstatus = $?
+      if exitstatus == 0
+        return data
+      else
+        @logger.warn("Can't get data from lspci. Reason: lspci exited with status #{exitstatus}")
+      end
+    else
+      @logger.warn("Can't find lspci. Reason: 'which lspci' returned exit status #{exitstatus}")
+    end
+  rescue => e
+    @logger.warn("Can't get data from lspci. Reason: #{e.message}")
   end
 
   def update_state
