@@ -350,6 +350,14 @@ class NodeAgent
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
         end
+        # Get PCI-ID
+        begin
+          vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
+          device = File.read("/sys/class/net/#{int}/device/device").chomp.gsub(/^0x/, '')
+          int_meta[:pci_id] = "#{vendor}:#{device}"
+        rescue
+          int_meta[:pci_id] = ""
+        end
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
