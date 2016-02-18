@@ -302,6 +302,14 @@ class NodeAgent
     DEFAULT_SRIOV
   end
 
+  def nic_pci_id(int)
+    vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
+    device = File.read("/sys/class/net/#{int}/device/device").chomp.gsub(/^0x/, '')
+    "#{vendor}:#{device}"
+  rescue
+    ""
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -393,6 +401,8 @@ class NodeAgent
         end
         # Getting SR-IOV info
         int_meta[:interface_properties][:sriov] = sriov_info(int, int_meta[:bus_info])
+        # Get PCI-ID
+        int_meta[:interface_properties][:pci_id] = nic_pci_id(int)
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
