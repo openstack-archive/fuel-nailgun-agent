@@ -379,21 +379,53 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+        dmsetup = `/sbin/dmsetup info -c --nameprefixes --noheadings --rows -o blkdevname,blkdevs_used`
+        dv = {}
+        dmsetup.lines.each do |line|
+            k, v = line.split('=')
+            dv[k] = v.strip().gsub(/'/, '')
+        end
+        @logger.debug("#{dv}")
+        dv["DM_BLKDEVS_USED"] = dv["DM_BLKDEVS_USED"].split(',')
+        @logger.debug("#{dv}")
+
+        mpath_devices = {
+            dv["DM_BLKDEVNAME"] =>dv["DM_BLKDEVS_USED"] 
+        }
+        mapping = []
+        dv["DM_BLKDEVS_USED"].each do | d |
+            mapping << d
+        end
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
-          if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
+            dname = bname.gsub(/!/, '/')
+          
+          @logger.debug("XXX: #{mpath_devices} #{dname} #{mpath_devices.has_key?(dname)}" )
+          multipath = mpath_devices.has_key?(dname)
+          if (physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo) || multipath
             @logger.debug("Block device seems to be physical data storage: #{bname}")
             block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
-            if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
+            if ! multipath && block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
               pci_vendor_id = _get_pci_vendor_id(bname)
               @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
               unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
+          @logger.debug("Block: #{dname} skipping")
                 next
               end
               @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
-            dname = bname.gsub(/!/, '/')
+            if mpath_devices.include?(dname)
+                block = {}
+                block[:paths] = mpath_devices[dname]
+                block[:disk] = dname
+                block[:removable] = 0
+                block[:extra] = ''
+            end
+            if mapping.include?(dname)
+          @logger.debug("Block: #{dname} skipping")
+                next
+            end
 
             # ohai reports the disk size according to /sys/block/#{bname}
             # which is always measured in 512 bytes blocks, no matter what
@@ -408,7 +440,8 @@ class NodeAgent
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :paths => block[:paths]
             }
           end
         end
@@ -853,7 +886,7 @@ end
 # from reporting to master node all at once
 sleep_time = rand(30)
 logger.debug("Sleep for #{sleep_time} seconds before sending request")
-sleep(sleep_time)
+#sleep(sleep_time)
 
 if File.exist?('/etc/nailgun-agent/nodiscover')
   logger.info("Discover prevented by /etc/nailgun-agent/nodiscover presence.")
@@ -890,3 +923,4 @@ rescue => ex
   # NOTE(mihgen): There is no need to retry - cron will do it for us
   logger.error "#{ex.message}\n#{ex.backtrace}"
 end
+
