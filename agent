@@ -378,14 +378,17 @@ class NodeAgent
 
     begin
       Timeout::timeout(30) do
+        mpath_devices, mapping = multipath_devices
         @logger.debug("Trying to find block devices")
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
-          if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
+            dname = bname.gsub(/!/, '/')
+          multipath = mpath_devices.has_key?(dname)
+          if (physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo) || multipath
             @logger.debug("Block device seems to be physical data storage: #{bname}")
             block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
-            if block[:removable] =~ /^1$/ && ! REMOVABLE_VENDORS.include?(binfo[:vendor])
+            if (! multipath && block[:removable] =~ /^1$/) && (! REMOVABLE_VENDORS.include?(binfo[:vendor]))
               pci_vendor_id = _get_pci_vendor_id(bname)
               @logger.debug("Block device #{bname} is removable. PCI vendor ID: #{pci_vendor_id}")
               unless REMOVABLE_PCI_VENDORS.include?(pci_vendor_id)
@@ -393,7 +396,19 @@ class NodeAgent
               end
               @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
-            dname = bname.gsub(/!/, '/')
+
+            next if mapping.include?(dname)
+
+            if mpath_devices.include?(dname)
+                device = mpath_devices[dname]
+                block = {
+                    :paths => device["DM_BLKDEVS_USED"],
+                    :disk => dname,
+                    :removable => 0,
+                    :extra => []
+                }
+                dname = 'mapper/' + device[dname]["DM_NAME"]
+            end
 
             # ohai reports the disk size according to /sys/block/#{bname}
             # which is always measured in 512 bytes blocks, no matter what
@@ -408,7 +423,8 @@ class NodeAgent
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :paths => block[:paths]
             }
           end
         end
@@ -419,6 +435,28 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def multipath_devices()
+    dmsetup = `/sbin/dmsetup info -c --nameprefixes --noheadings -o blkdevname,subsystem,blkdevs_used,name`
+    mpath_devices = {}
+    mapping = []
+    unless dmsetup.include?("No devices found")
+      dmsetup.lines.each do |line|
+        device = {}
+        line.split(/:/).each do |key_value|
+          k, v = key_value.split('=')
+          device[k] = v.strip().gsub(/'/, '')
+        end
+        device["DM_BLKDEVS_USED"] = device["DM_BLKDEVS_USED"].split(',')
+        device["DM_BLKDEVS_USED"].each do | name |
+          mapping << name
+        end
+        next unless mpath_devices["DM_SUBSYSTEM"] == 'mpath'
+        mpath_devices[device["DM_BLKDEVNAME"]] = device
+      end
+    end
+    [mpath_devices, mapping]
   end
 
   def _get_pci_vendor_id(devname)
