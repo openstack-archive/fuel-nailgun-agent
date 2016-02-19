@@ -379,6 +379,20 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+        dmsetup = `/sbin/dmsetup info -c --nameprefixes --noheadings --rows -o name,uuid,suspended,blkdevs_used`
+        dv = {}
+        s.lines.each do |line|
+            k, v = line.split('=')
+            dv[k] = v.strip("'")
+        end
+
+        mpath_devies = {
+            dv[:DM_BLKDEVNAME] => dv[:DM_BLKDEVS_USED].split(',')
+        }
+        mapping = {}
+        dv[:DM_BLKDEVS_USED].split(',').each do | d |
+            mapping[d] = dv[:DM_BLKDEVNAME]
+        end
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
@@ -394,6 +408,12 @@ class NodeAgent
               @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
             dname = bname.gsub(/!/, '/')
+            if mpath_devices.include?(dname)
+                block[:paths] = mpath_devices[dname]
+            end
+            if mapping.include?(dname)
+                next
+            end
 
             # ohai reports the disk size according to /sys/block/#{bname}
             # which is always measured in 512 bytes blocks, no matter what
@@ -408,7 +428,8 @@ class NodeAgent
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :paths => block[:paths]
             }
           end
         end
