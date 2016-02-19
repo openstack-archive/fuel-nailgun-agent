@@ -156,6 +156,7 @@ class NodeAgent
     @logger.info("API URL is #{@api_url}")
     @os = ohai_system_info
     @numa_topology = get_numa_topology
+    @mpath_devices, @skip_devices = multipath_devices
   end
 
   def get_scheme_and_port
@@ -422,9 +423,21 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+
+        # ohai reports the disk size according to /sys/block/#{bname}
+        # which is always measured in 512 bytes blocks, no matter what
+        # the physical (minimal unit which can be atomically written)
+        # or logical (minimal # unit which can be addressed) block sizes are, see
+        # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
+        # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
+        block_size = 512
+
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
+          dname = bname.gsub(/!/, '/')
+          next if @skip_devices.include?(dname)
+
           if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
             @logger.debug("Block device seems to be physical data storage: #{bname}")
             block = physical_data_storage_devices.select{|d| d[:name] == bname}[0]
@@ -436,22 +449,27 @@ class NodeAgent
               end
               @logger.debug("Block device #{bname} is accepted by PCI vendor ID")
             end
-            dname = bname.gsub(/!/, '/')
 
-            # ohai reports the disk size according to /sys/block/#{bname}
-            # which is always measured in 512 bytes blocks, no matter what
-            # the physical (minimal unit which can be atomically written)
-            # or logical (minimal # unit which can be addressed) block sizes are, see
-            # http://lxr.free-electrons.com/source/include/linux/types.h?v=4.4#L124
-            # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
-            block_size = 512
             detailed_meta[:disks] << {
               :name => dname,
               :model => binfo[:model],
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :paths => nil
+            }
+
+          elsif @mpath_devices.has_key?(dname)
+            device = @mpath_devices[dname]
+            detailed_meta[:disks] << {
+              :name => 'mapper/' + device["DM_NAME"],
+              :model => binfo[:model],
+              :size => (binfo[:size].to_i * block_size),
+              :disk => dname,
+              :extra => _disk_id_by_name(dname),
+              :removable => 0,
+              :paths => device["DM_BLKDEVS_USED"].map{|name| _disk_path_by_name(name)}.join(', ')
             }
           end
         end
@@ -462,6 +480,31 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def multipath_devices()
+    dmsetup = `/sbin/dmsetup info -c --nameprefixes --noheadings -o blkdevname,subsystem,blkdevs_used,name,uuid`
+    mpath_devices = {}
+    mapping = []
+    unless dmsetup.include?("No devices found")
+      dmsetup.lines.each do |line|
+        device = {}
+        line.split(/:/).each do |key_value|
+          k, v = key_value.split('=')
+          device[k] = v.strip().gsub(/'/, '')
+        end
+        next unless device["DM_SUBSYSTEM"] == 'mpath'
+        device["DM_BLKDEVS_USED"] = device["DM_BLKDEVS_USED"].split(',')
+        device["DM_BLKDEVS_USED"].each do | name |
+          mapping << name
+        end
+        mpath_devices[device["DM_BLKDEVNAME"]] = device
+      end
+    end
+    [mpath_devices, mapping]
+  rescue => e
+    @logger.error("Error '#{e.message}' while scanning for multipath devices.")
+    [{}, []]
   end
 
   def _get_pci_vendor_id(devname)
