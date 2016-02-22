@@ -354,6 +354,10 @@ class NodeAgent
           # return empty array to support nailgun's rest api call
           int_meta[:offloading_modes] = []
         end
+        # Get numa node
+        int_meta[:numa_node] = @numa_topology[:numa_nodes].select { |node|
+          node[:pcidevs].include?(int_meta[:bus_info])
+        }.first[:id]
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
@@ -835,12 +839,15 @@ class NodeAgent
 
     doc.elements.each(element) do |numa|
 
-      struct = {:id=> nil, :cpus => [], :memory => nil}
+      struct = {:id=> nil, :cpus => [], :memory => nil, :pcidevs => []}
       struct[:id] = numa.attributes['os_index']
       struct[:memory] = numa.attributes['local_memory']
 
       numa.elements.each("object/object/object[@type='PU']") do |pu|
         struct[:cpus] << pu.attributes['os_index']
+      end
+      numa.elements.each("object/object/object[@type='PCIDev']") do |pcidev|
+        struct[:pcidevs] << pcidev.attributes['pci_busid']
       end
       topology[:numa_nodes] << struct
     end
