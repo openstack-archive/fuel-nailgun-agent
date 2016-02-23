@@ -408,7 +408,8 @@ class NodeAgent
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :dmsetup_info => block[:dmsetup_info]
             }
           end
         end
@@ -602,15 +603,21 @@ class NodeAgent
 
       if STORAGE_CODES.include?(properties['MAJOR'].to_i)
         @logger.debug("Device #{devname} seems to be appropriate")
-        # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
-        unless properties['DEVPATH'].include?('virtual/block/dm')
-          @blocks << {
-            :name => basename_dir,
-            :disk => _disk_path_by_name(devname) || devname,
-            :extra => _disk_id_by_name(devname) || [],
-            :removable => removable,
-          }
+        dm_properties = `/sbin/dmsetup info -c --nameprefixes --noheadings --rows -o subsystem,name,uuid,blkdevs_used /dev/#{devname}`.split("\n").inject({}) do |result, raw_dm_propety|
+          key, value = raw_dm_propety.split(/\=/)
+          key = key.strip
+          value = value.strip.chomp("'").reverse.chomp("'").reverse
+          value = value.split(',') if key == "DM_BLKDEVS_USED"
+          result.update(key => value)
         end
+        @logger.debug("Device #{devname} has dm_properties : #{dm_properties.inspect}")
+        @blocks << {
+          :name => basename_dir,
+          :disk => _disk_path_by_name(devname) || devname,
+          :extra => _disk_id_by_name(devname) || [],
+          :removable => removable,
+          :dmsetup_info => dm_properties
+        }
       end
     end
     @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
