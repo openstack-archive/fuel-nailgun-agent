@@ -383,6 +383,7 @@ class NodeAgent
     begin
       Timeout::timeout(30) do
         @logger.debug("Trying to find block devices")
+        opt_io = get_opt_io()
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
@@ -412,7 +413,8 @@ class NodeAgent
               :size => (binfo[:size].to_i * block_size),
               :disk => block[:disk],
               :extra => block[:extra],
-              :removable => block[:removable]
+              :removable => block[:removable],
+              :opt_io => opt_io[dname]
             }
           end
         end
@@ -567,6 +569,19 @@ class NodeAgent
       @logger.error("Error '#{e.message}' in finding fake raid MDs: #{e.backtrace}")
     end
     return mds, devices
+  end
+
+  def get_opt_io
+    output = `lsblk --nodeps --bytes --noheadings --output NAME,MIN-IO,OPT-IO`
+    output.split("\n")
+
+	ret = {}
+	output.split("\n").each do |line|
+      name, min_io, opt_io = line.split()
+      ret[name] = opt_io.to_i != 0 ? opt_io.to_i : min_io.to_i
+	end
+
+	ret
   end
 
   def physical_data_storage_devices
