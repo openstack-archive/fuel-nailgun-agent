@@ -898,13 +898,13 @@ class NodeAgent
 
     topology = {:numa_nodes => [], :supported_hugepages => supported_hugepages, :distances => nil}
 
-    doc.elements.each('/topology/object/distances/') do |dist|
+    doc.elements.each('//distances/') do |dist|
       topology[:distances] = dist.elements.collect{|v| v.attributes['value']}
         .each_slice(dist.attributes['nbobjs'].to_i).to_a
     end
 
-    numa_node = "/topology/object/object[@type='NUMANode']"
-    element = doc.elements[numa_node] ? numa_node : "/topology/object[@type='Machine']"
+    numa_node = "//object[@type='NUMANode']"
+    element = doc.elements["//object[@type='NUMANode']"] ? numa_node : "//object[@type='Machine']"
 
     doc.elements.each(element) do |numa|
 
@@ -912,10 +912,10 @@ class NodeAgent
       struct[:id] = numa.attributes['os_index'].to_i
       struct[:memory] = numa.attributes['local_memory'].to_i
 
-      numa.elements.each("object/object/object[@type='PU']") do |pu|
+      numa.elements.each("#{numa.xpath}//[@type='PU']") do |pu|
         struct[:cpus] << pu.attributes['os_index'].to_i
       end
-      numa.elements.each("object/object/object[@type='PCIDev']") do |pcidev|
+      numa.elements.each("#{numa.xpath}//[@type='PCIDev']") do |pcidev|
         struct[:pcidevs] << pcidev.attributes['pci_busid']
       end
       topology[:numa_nodes] << struct
