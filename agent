@@ -943,7 +943,7 @@ class NodeAgent
 
     doc = Document.new `lstopo --no-caches --of xml`
 
-    topology = {:numa_nodes => [], :supported_hugepages => supported_hugepages, :distances => nil}
+    topology = {:numa_nodes => [], :supported_hugepages => supported_hugepages, :distances => [["1.0"]]}
 
     doc.elements.each('/topology/object/distances/') do |dist|
       topology[:distances] = dist.elements.collect{|v| v.attributes['value']}
