@@ -5,7 +5,7 @@
 Name:      %{name}
 Version:   %{version}
 Release:   %{release}
-Source0:   fuel-%{name}-%{version}.tar.gz
+Source0:   %{name}-%{version}.tar.gz
 Summary:   Nailgun startup agent
 URL:       http://mirantis.com
 License:   ASL 2.0
