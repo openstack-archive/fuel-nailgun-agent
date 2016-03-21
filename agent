@@ -902,21 +902,25 @@ class NodeAgent
   end
 
   def _get_pci_dev_list
-    lshw_path = `which lshw`.chomp
-    exitstatus = $?
-    if exitstatus == 0
-      data = `#{lshw_path} -json`
+    lshw_timeout = @settings['lshw_timeout'] or 60
+    Timeout::timeout(lshw_timeout) do
+      lshw_path = `which lshw`.chomp
       exitstatus = $?
       if exitstatus == 0
-        return JSON.parse(data)
+        data = `#{lshw_path} -json`
+        exitstatus = $?
+        if exitstatus == 0
+          return JSON.parse(data)
+        else
+          @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{exitstatus}")
+        end
       else
-        @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{exitstatus}")
+        @logger.warn("Can't find lshw. Reason: 'which lshw' returned exit status #{exitstatus}")
       end
-    else
-      @logger.warn("Can't find lshw. Reason: 'which lshw' returned exit status #{exitstatus}")
     end
   rescue => e
     @logger.warn("Can't get data from lshw. Reason: #{e.message}")
+    {}
   end
 
   def get_numa_topology
