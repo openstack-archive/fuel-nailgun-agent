@@ -282,7 +282,7 @@ class NodeAgent
   #          IOVCtl: Enable- Migration- Interrupt- MSE- ARIHierarchy-
   #          IOVSta: Migration-
   #          Initial VFs: 8, Total VFs: 8, Number of VFs: 0, Function Dependency Link: 01
-  #          VF offset: 128, stride: 4, Device ID: 1520
+  #          VF offset: 128, stride: 4, Device ID: 10ed
   #          Supported Page Size: 00000553, System Page Size: 00000001
   #          Region 0: Memory at 0000000090040000 (64-bit, prefetchable)
   #          Region 3: Memory at 0000000090060000 (64-bit, prefetchable)
@@ -295,7 +295,7 @@ class NodeAgent
       sriov["available"] = true
       sriov["sriov_totalvfs"] = lspci.scan(/\s+Total\s+VFs:\s+(\d+)/).last.first.to_i - 1
       vf_vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
-      vf_device = lspci.scan(/VF\s+.*\s+Device\s+ID:\s+(\d+)/).last.first
+      vf_device = lspci.scan(/VF\s+.*\s+Device\s+ID:\s+([A-Fa-f0-9]+)/).last.first
       sriov["pci_id"] = "#{vf_vendor}:#{vf_device}"
     end
     sriov
