@@ -156,6 +156,8 @@ class NodeAgent
     @logger.info("API URL is #{@api_url}")
     @os = ohai_system_info
     @numa_topology = get_numa_topology
+
+    multipath_refresh
     @mpath_devices, @skip_devices = multipath_devices
   end
 
@@ -530,6 +532,23 @@ class NodeAgent
   rescue => e
     @logger.error("Error '#{e.message}' while scanning for multipath devices.")
     [{}, []]
+  end
+
+  def multipath_refresh
+    mpath_refresh_timeout = @settings['mpath_refresh_timeout'] || 380
+    Timeout::timeout(mpath_refresh_timeout) do
+      multipath_path = `which multipath`.chomp
+      if $?.success?
+        `#{multipath_path} -F && #{multipath_path} -r && #{multipath_path} -ll && udevadm settle --subsystem=block`
+        if not $?.success?
+            @logger.warn("multipath refreshing failed with status #{$?.exitstatus}")
+        end
+      else
+         @logger.warn("Unable to find multipath #{$?.exitstatus}")
+      end
+    end
+  rescue => e
+    @logger.warn("Multipath refreshing failed due to: #{e.message}")
   end
 
   def _get_pci_vendor_id(devname)
