@@ -481,7 +481,8 @@ class NodeAgent
               :disk => block[:disk],
               :extra => block[:extra],
               :removable => block[:removable],
-              :paths => nil
+              :paths => nil,
+              :opt_io => get_opt_io.fetch(dname, block_size)
             }
 
           elsif @mpath_devices.has_key?(dname)
@@ -731,6 +732,28 @@ class NodeAgent
     end
     @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
     @blocks
+  end
+
+  def get_opt_io
+    if defined? @opt_io_res
+        return @opt_io_res
+    end
+
+    @opt_io_res = {}
+
+    # example output:
+    # sda    4096      0
+    # sdb     512      2048
+    output = `lsblk --nodeps --bytes --noheadings --output NAME,MIN-IO,OPT-IO`
+    output.split("\n").each do |line|
+      name, min_io, opt_io = line.split()
+      @opt_io_res[name] = opt_io.to_i != 0 ? opt_io.to_i : min_io.to_i
+    end
+
+    return @opt_io_res
+  rescue Exception => e
+    @logger.error("Error '#{e.message}' in obtaining optimal io size: #{e.backtrace}")
+    {}
   end
 
   def _is_virtualbox
