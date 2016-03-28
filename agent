@@ -453,6 +453,7 @@ class NodeAgent
         # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
         block_size = 512
 
+        opt_io = get_opt_io()
         (@os[:block_device] or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
@@ -478,7 +479,8 @@ class NodeAgent
               :disk => block[:disk],
               :extra => block[:extra],
               :removable => block[:removable],
-              :paths => nil
+              :paths => nil,
+              :opt_io => opt_io.fetch(dname, block_size)
             }
 
           elsif @mpath_devices.has_key?(dname)
@@ -726,6 +728,22 @@ class NodeAgent
     end
     @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
     @blocks
+  end
+
+  def get_opt_io
+    begin
+      ret = {}
+
+      output = `lsblk --nodeps --bytes --noheadings --output NAME,MIN-IO,OPT-IO`
+      output.split("\n").each do |line|
+        name, min_io, opt_io = line.split()
+        ret[name] = opt_io.to_i != 0 ? opt_io.to_i : min_io.to_i
+      end
+
+    rescue Exception => e
+      @logger.error("Error '#{e.message}' in obtaining optimal io size: #{e.backtrace}")
+    end
+    return ret
   end
 
   def _is_virtualbox
