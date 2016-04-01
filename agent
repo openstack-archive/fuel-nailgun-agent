@@ -292,8 +292,11 @@ class NodeAgent
     sriov = DEFAULT_SRIOV.dup
     lspci = _get_lspci_info(int_bus_info)
     if lspci.match(/.*Capabilities:.*SR-IOV.*/)
-      sriov["available"] = true
-      sriov["sriov_totalvfs"] = lspci.scan(/\s+Total\s+VFs:\s+(\d+)/).last.first.to_i - 1
+      sriov["sriov_totalvfs"] = lspci.scan(/\s+Total\s+VFs:\s+(\d+)/).last.first.to_i
+      unless sriov["sriov_totalvfs"] == 0
+        sriov["available"] = true
+        sriov["sriov_totalvfs"] -= 1
+      end
       vf_vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
       vf_device = lspci.scan(/VF\s+.*\s+Device\s+ID:\s+([A-Fa-f0-9]+)/).last.first
       sriov["pci_id"] = "#{vf_vendor}:#{vf_device}"
