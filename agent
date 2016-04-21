@@ -32,6 +32,7 @@ require 'uri'
 # TODO(vsharshov): replace below lines by this string after excluding Ruby 1.8
 require 'pathname'
 require 'rexml/document'
+require 'socket'
 include REXML
 
 unless Process.euid == 0
@@ -1036,6 +1037,10 @@ def write_data_to_file(logger, filename, data)
   end
 end
 
+def is_provisioned
+  return Socket.gethostname != 'bootstrap'
+end
+
 logger = Logger.new(STDOUT)
 
 if File.exist?('/etc/nailgun_uid')
@@ -1079,7 +1084,9 @@ begin
   end
   new_id = JSON.parse(resp.body)['id']
   mc_config = McollectiveConfig.new(logger)
-  mc_config.replace_identity(new_id)
+  unless is_provisioned
+    mc_config.replace_identity(new_id)
+  end
   write_data_to_file(logger, '/etc/nailgun_uid', new_id.to_s)
 rescue => ex
   # NOTE(mihgen): There is no need to retry - cron will do it for us
