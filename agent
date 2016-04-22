@@ -369,8 +369,6 @@ class NodeAgent
             int_meta[:pxe] = admin_mac == int_meta[:mac]
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
-              int_meta[:driver] = int_info.driver
-              int_meta[:bus_info] = int_info.bus_info
               int_meta[:max_speed] = int_info.best_mode.speed
               if int_info.current_mode.speed == :unknown
                 int_meta[:current_speed] = nil
@@ -380,6 +378,14 @@ class NodeAgent
             rescue
               int_meta[:current_speed] = nil
             end
+
+            # Don't use Rethtool to get driver info, because some drivers
+            # don't implement ETHTOOL_GLINKSETTINGS command, but implement
+            # ETHTOOL_GDRVINFO, for example virtio driver.
+            driver_info = get_eth_driver_info(int)
+            int_meta[:driver] = driver_info["driver"]
+            int_meta[:bus_info] = driver_info["bus-info"]
+
           elsif (addrinfo[:family] rescue nil) =~ /^inet$/
             int_meta[:ip] = addr
             int_meta[:netmask] = addrinfo[:netmask] if addrinfo[:netmask]
@@ -1001,6 +1007,25 @@ class NodeAgent
   rescue => e
     @logger.warn("Can't get data from lspci for #{device} slot. Reason: #{e.message}")
     ""
+  end
+
+  def get_eth_driver_info(int)
+    # example output:
+    #
+    # firmware-version:
+    # bus-info: 0000:00:03.0
+    # ....
+    drv_info = {}
+    output = `ethtool --driver #{int}`
+    output.split("\n").each do |line|
+      k, v = line.split(":", 2)
+      drv_info[k] = v.strip() if v
+    end
+
+    drv_info
+  rescue Exception => e
+    @logger.error("Error '#{e.message}' obtaining interface #{int} driver info: #{e.backtrace}")
+    {}
   end
 
   def update_state
