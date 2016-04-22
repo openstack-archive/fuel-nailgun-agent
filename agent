@@ -29,6 +29,7 @@ require 'rethtool'
 require 'digest'
 require 'timeout'
 require 'uri'
+require 'optparse'
 # TODO(vsharshov): replace below lines by this string after excluding Ruby 1.8
 require 'pathname'
 require 'rexml/document'
@@ -145,15 +146,19 @@ class NodeAgent
   API_DEFAULT_PORT = "8443"
   API_LEGACY_PORT = "8000"
 
-  def initialize(logger)
+  def initialize(logger, dry_run)
     @logger = logger
     @settings = get_settings()
-    @api_ip = URI(@settings['url']).host or API_DEFAULT_ADDRESS
 
-    scheme, api_port = get_scheme_and_port()
+    unless dry_run
+      @api_ip = URI(@settings['url']).host || API_DEFAULT_ADDRESS
 
-    @api_url = "#{scheme}://#{@api_ip}:#{api_port}/api"
-    @logger.info("API URL is #{@api_url}")
+      scheme, api_port = get_scheme_and_port
+
+      @api_url = "#{scheme}://#{@api_ip}:#{api_port}/api"
+      @logger.info("API URL is #{@api_url}")
+    end
+
     @os = ohai_system_info
     @numa_topology = get_numa_topology
     @mpath_devices, @skip_devices = multipath_devices
@@ -1032,6 +1037,12 @@ class NodeAgent
       @node_state = "discover" if system_type == "bootstrap"
     end
   end
+
+  def print
+    s = _data.to_json
+    @logger.info("Data collected by nailgun-agent:")
+    @logger.info(s)
+  end
 end
 
 def write_data_to_file(logger, filename, data)
@@ -1057,6 +1068,15 @@ def write_data_to_file(logger, filename, data)
   end
 end
 
+dry_run = false
+OptionParser.new do |opts|
+  opts.banner = "Usage: nailgun-agent [options]"
+
+  opts.on("-d", "--dry-run", "Only print collected information, don't send it anywhere.") do |_d|
+    dry_run = true
+  end
+end.parse!
+
 logger = Logger.new(STDOUT)
 
 if File.exist?('/etc/nailgun_uid')
@@ -1067,17 +1087,24 @@ end
 
 # random sleep is here to prevent target nodes
 # from reporting to master node all at once
-sleep_time = rand(30)
-logger.debug("Sleep for #{sleep_time} seconds before sending request")
-sleep(sleep_time)
+unless dry_run
+  sleep_time = rand(30)
+  logger.debug("Sleep for #{sleep_time} seconds before sending request")
+  sleep(sleep_time)
+end
 
 if File.exist?('/etc/nailgun-agent/nodiscover')
   logger.info("Discover prevented by /etc/nailgun-agent/nodiscover presence.")
   exit 1
 end
 
-agent = NodeAgent.new(logger)
+agent = NodeAgent.new(logger, dry_run)
 agent.update_state
+
+if dry_run
+  agent.print
+  exit 0
+end
 
 begin
   unless File.exist?('/etc/nailgun_uid')
