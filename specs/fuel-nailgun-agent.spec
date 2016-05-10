@@ -1,6 +1,6 @@
 %define name nailgun-agent
 %{!?version: %define version 8.0.0}
-%{!?release: %define release 1}
+%{!?release: %define release 2}
 
 Name:      %{name}
 Version:   %{version}
