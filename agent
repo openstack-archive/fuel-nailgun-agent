@@ -18,7 +18,7 @@ begin
   require 'rubygems'
 rescue LoadError
 end
-require 'ohai/system'
+require 'facter'
 require 'json'
 require 'httpclient'
 require 'logger'
@@ -160,7 +160,8 @@ class NodeAgent
       @logger.info("API URL is #{@api_url}")
     end
 
-    @os = ohai_system_info
+    @facter = facter_system_info
+    @network = _network
     @numa_topology = get_numa_topology
     @mpath_devices, @skip_devices = multipath_devices
   end
@@ -195,19 +196,9 @@ class NodeAgent
     agent_settings.merge(cmdline_settings)
   end
 
-  def ohai_system_info
-    Timeout::timeout(30) do
-      os = Ohai::System.new()
-      os.all_plugins
-      os
-    end
-  rescue Timeout::Error
-    # When one of disks is broken, do not collect data about block devices
-    # More details: https://bugs.launchpad.net/fuel/+bug/1396086
-    Ohai::Config[:disabled_plugins]=['linux::block_device', 'linux::filesystem']
-    os = Ohai::System.new()
-    os.all_plugins
-    os
+  def facter_system_info
+    Facter.loadfacts
+    Facter.to_hash
   end
 
   def put
@@ -239,14 +230,218 @@ class NodeAgent
     client
   end
 
-  def _interfaces
-    interfaces = @os[:network][:interfaces].inject([]) do |result, elm|
-      result << { :name => elm[0], :addresses => elm[1]["addresses"] }
+  def _get_iface_info(ifname)
+    info = {}
+    info[:name] = ifname
+    info[:addresses] = {}
+    if ifname =~ /^(\D+)(\d+.*)/ # enp0s11, enp0, eth0
+      info[:type] = $1 # enp, enp, eth
+      info[:number] = $2 # 0s11, 0, 0
     end
-    interfaces << { "default_interface" => @os["network"]["default_interface"] }
-    interfaces << { "default_gateway"   => @os["network"]["default_gateway"] }
-    interfaces
+    data = `ip a s dev #{ifname}`
+    #2: enp0s3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master br-fw-admin state UP group default qlen 1000
+    #    link/ether 64:de:13:ab:f4:1d brd ff:ff:ff:ff:ff:ff
+    #    inet6 fe80::66de:13ff:feab:f41d/64 scope link
+    #       valid_lft forever preferred_lft forever
+    data.each_line do |line|
+      case line.strip
+        when /(\d+): #{ifname}: <([^>]*)> mtu (\d+) (.+) state (\w+)/
+          info[:flags] = $2.split(',')
+          info[:mtu] = $3
+          info[:state] = $5.downcase
+        when /link\/(\w+) ([\da-f\:]+) brd ([\da-f\:]+)/
+          info[:addresses][$2.upcase] = { :family => "lladdr" } if $2 != "00:00:00:00:00:00"
+          info[:encapsulation] = case $1
+            when /loopback/i then 'Loopback'
+            when /IPIP Tunnel/ then 'IPIP'
+            when /Point-to-Point Protocol/ then 'PPP'
+            when /IPv6-in-IPv4/ then '6to4'
+            when /ether/ then'Ethernet'
+            else nil
+          end
+        when /inet (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(\/(\d{1,2}))( brd (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}))? scope (\w+)?/
+          info[:addresses][$1] = { :family => "inet", "prefixlen" => $3 ||32 }
+          info[:addresses][$1][:scope] = ($6.eql?("host") ? "Node" : $6.capitalize)
+          info[:addresses][$1][:netmask] = IPAddr.new("255.255.255.255").mask(($3 ||32).to_i).to_s
+          info[:addresses][$1][:broadcast] = $5
+        when /inet6 ([a-f0-9\:]+)\/(\d+) scope (\w+)/
+          info[:addresses][$1] = { :family => "inet6", "prefixlen" => $2, "scope" => ($3.eql?("host") ? "Node" : $3.capitalize) }
+      end
+    end
+    data = `ip -d link show dev #{ifname}`
+    #2: enp0s3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master br-fw-admin state UP mode DEFAULT group default qlen 1000
+    #    link/ether 64:de:13:ab:f4:1d brd ff:ff:ff:ff:ff:ff promiscuity 1
+    #    bridge_slave state forwarding priority 32 cost 4 hairpin off guard off root_block off fastleave off learning on flood on addrgenmode eui64
+    data.each_line do |line|
+      next if line =~ /^\d+/
+      if line =~ /state (\w+)/
+        info[:state] = $1.downcase
+      end
+      if line =~ /vlan id (\d+)/
+        vid = $1
+        info[:state][:vlan] = {}
+        info[:state][:vlan][:id] = vid
+      end
+    end
+    info
   end
+
+  def _get_all_interfaces_info
+    res = {}
+    res[:interfaces] = {}
+    Facter::Util::IP.get_interfaces().each do |ifname|
+      res[:interfaces][ifname] = _get_iface_info(ifname)
+    end
+    %w[inet inet6].each do |family|
+      #default via 10.109.3.1 dev br-ex 
+      #10.109.0.0/24 dev br-fw-admin  proto kernel  scope link  src 10.109.0.4 
+      #10.109.1.0/24 dev br-mgmt  proto kernel  scope link  src 10.109.1.3 
+      #10.109.2.0/24 dev br-storage  proto kernel  scope link  src 10.109.2.3 
+      #10.109.3.0/24 dev br-ex  proto kernel  scope link  src 10.109.3.3 
+      #240.0.0.0/30 dev hapr-host  proto kernel  scope link  src 240.0.0.1 
+      #240.0.0.4/30 dev vr-host-base  proto kernel  scope link  src 240.0.0.5 
+      `ip -f #{family} route show`.each_line do |line|
+        if line =~ /^([^\s]+)\s(.*)$/
+          rdest = $1
+          rend = $2
+          next if not rend =~ /\bdev\s+([^\s]+)\b/
+          rint = $1
+          next if not res[:interfaces].has_key?(rint)
+          rent = {:destination => rdest, :family => family}
+          %w[via scope metric proto src].each do |k|
+            rent[k] = $1 if rend =~ /\b#{k}\s+([^\s]+)\b/
+          end
+          next if rent[:src] and not res[:interfaces][rint].has_key?(rent[:src])
+          res[:interfaces][rint][:routes] = [] if not res[:interfaces][rint][:routes]
+          res[:interfaces][rint][:routes] << rent
+        end
+      end
+    end
+    res
+  end
+
+  def _network
+    iface = nil
+    gw = nil
+    route = `ip r list 0/0`.strip # 'default via 10.21.5.1 dev eth0'
+    if route =~ /^default via ?([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) dev ([a-zA-Z0-9_-]+)/
+      gw = $1
+      iface = $2
+    end
+    result = _get_all_interfaces_info
+    result[:default_gateway] = gw
+    result[:default_interface] = iface
+    result[:mac] = @facter["macaddress_#{iface.gsub('-', '_')}"].upcase
+    result
+  end
+
+  def _get_detailed_cpuinfo
+    real = {}
+    info = {}
+    info[:total] = 0
+    curr_proc = nil
+    File.open('/proc/cpuinfo').each do |l|
+      case l.strip
+        when /processor\s+:\s(.+)/
+          info[:total] += 1
+          curr_proc = $1
+          info[curr_proc] = {}
+        when /^cpu MHz\s+:\s(.+)/
+          info[curr_proc][:mhz] = $1
+        when /^physical id\s+:\s(.+)/
+          info[curr_proc][:physical_id] = $1
+          real[$1] = true
+        when /^flags\s+:\s(.+)/
+          info[curr_proc][:flags] = $1.split
+        when /^address sizes\s+:\s(\d+) bits (\w+), (\d+) bits (\w+)/
+          info[curr_proc][:address_sizes] = {}
+          info[curr_proc][:address_sizes][$2.to_sym] = $1
+          info[curr_proc][:address_sizes][$4.to_sym] = $3
+        when /(.+)\s+:\s(.+)/
+          value = $2
+          key = $1.strip.downcase.gsub(/ /, '_')
+          info[curr_proc][key.to_sym] = value
+      end
+    end
+    info[:real] = real.keys.size
+    info
+  end
+
+  def _get_blkdev_info
+    info = {}
+    if File.directory?('/sys/block/')
+      begin
+      Timeout::timeout(10) do
+        Dir['/sys/block/*'].each do |blkdir|
+          blkdev = File.basename(blkdir)
+          info[blkdev] = Hash.new
+          Dir.glob("/sys/block/#{blkdev}/{size,removable}").each do |g|
+            File.open(g) { |f| info[blkdev][File.basename(g).to_sym] = f.read_nonblock(1024).strip }
+          end
+          Dir.glob("/sys/block/#{blkdev}/device/{model,rev,state,timeout,vendor}").each do |g|
+            File.open(g) { |f| info[blkdev][File.basename(g).to_sym] = f.read_nonblock(1024).strip }
+          end
+        end # of blkdir
+      end # of timeout
+      rescue => e
+        @logger.error("Error '#{e.message}' in gathering disks metadata: #{e.backtrace}")
+      end
+    end # File.directory
+    info
+  end
+
+  def _get_dmi_info
+    info = {}
+    Dir['/sys/class/dmi/id/*'].each do |key|
+      if File.file?(key)
+        case File.basename(key)
+          when /product_uuid/
+            File.open(key) {|f| info[:uuid] = f.read_nonblock(1024).strip}
+          when /sys_vendor/
+            File.open(key) {|f| info[:sys_vendor] = info[:manufacturer] = f.read_nonblock(1024).strip}
+          else
+            File.open(key) {|f| info[File.basename(key).to_sym] = f.read_nonblock(1024).strip}
+        end
+      end
+    end
+    info
+  end
+
+  def _get_dmidecode_system_info
+    info = {}
+    info[:system] = {}
+    # dmidecode -t system
+    ## dmidecode 3.0
+    #Getting SMBIOS data from sysfs.
+    #SMBIOS 2.8 present.
+    #
+    #Handle 0x0100, DMI type 1, 27 bytes
+    #System Information
+    #  Manufacturer: QEMU
+    #  Product Name: Standard PC (i440FX + PIIX, 1996)
+    #  Version: pc-i440fx-2.4
+    #  Serial Number: Not Specified
+    #  UUID: 0C2041CE-94E4-453D-95DD-1682D5D8E487
+    #  Wake-up Type: Power Switch
+    #  SKU Number: Not Specified
+    #  Family: Not Specified
+    #
+    #Handle 0x2000, DMI type 32, 11 bytes
+    #System Boot Information
+    #  Status: No errors detected
+    `dmidecode -t system`.each_line do |l|
+      case l.strip
+        when /^SMBIOS (\S+)/
+          info[:dmidecode_version] = $1.strip
+        when /(.+):(.+)/
+          k = $1
+          v = $2
+          info[:system][k.downcase.gsub(/([ -])/, '_').to_sym] = v.strip
+      end
+    end
+    info
+  end
+
 
   # transform input array into array of the objects
   # Example:
@@ -387,19 +582,21 @@ class NodeAgent
       :system => _system_info,
       :interfaces => [],
       :cpu => {
-        :total => (@os[:cpu][:total].to_i rescue nil),
-        :real => (@os[:cpu][:real].to_i rescue nil),
-        :spec => [],
+        :total => (@facter['processorcount'].to_i rescue nil),
+        :real  => (@facter['physicalprocessorcount'].to_i rescue nil),
+        :spec  => [],
       },
       :disks => [],
-      :memory => (_dmi_memory or _ohai_memory),
+      :memory => (_dmi_memory or _facter_memory),
       :pci_devices => _get_pci_dev_list,
       :numa_topology => @numa_topology,
     }
 
-    admin_mac = (_master_ip_and_mac[:mac] or @os[:macaddress]) rescue nil
+    admin_mac = (_master_ip_and_mac[:mac] or @network[:mac]) rescue nil
     begin
-      (@os[:network][:interfaces] or {} rescue {}).each do |int, intinfo|
+      (@network[:interfaces] or {} rescue {}).each do |int, intinfo|
+        #next if not intinfo.has_key?(:name)
+        #int = intinfo[:name]
         # Send info about physical interfaces only
 
         next if intinfo[:encapsulation] !~ /^Ethernet.*/
@@ -489,7 +686,7 @@ class NodeAgent
     end
 
     begin
-      (@os[:cpu] or {} rescue {}).each do |cpu, cpuinfo|
+      (_get_detailed_cpuinfo or {} rescue {}).each do |cpu, cpuinfo|
         if cpu =~ /^[\d]+/ and cpuinfo
           frequency = cpuinfo[:mhz].to_i rescue nil
           begin
@@ -520,7 +717,7 @@ class NodeAgent
         # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
         block_size = 512
 
-        (@os[:block_device] or {} rescue {}).each do |bname, binfo|
+        (_get_blkdev_info or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
           dname = bname.gsub(/!/, '/')
@@ -829,31 +1026,35 @@ class NodeAgent
   end
 
   def _is_virtualbox
-    @os[:dmi][:system][:product_name] == "VirtualBox" rescue false
+    @facter['productname'] == "VirtualBox"
   end
 
   def _is_virtual
-    _is_virtualbox or @os[:virtualization][:role] == "guest" rescue false
+    @facter[:is_virtual]
   end
 
+  # JFYI: if /QEMU/ doesn't matched in /proc/cpuinfo
+  # ohai[:virtualization] will return empty hash on kvm systems
+  # So, this code have exactly same behavior.
+  # But in my opinion here should be returned real value.
   def _manufacturer
     if _is_virtualbox
-      @os[:dmi][:system][:product_name] rescue nil
-    elsif _is_virtual
-      @os[:virtualization][:system].upcase.strip rescue nil
+      @facter['productname']
+    elsif (@facter['manufacturer'].upcase != 'QEMU' && @facter['is_virtual'])
+      @facter['virtual']
     else
-      @os[:dmi][:system][:manufacturer].strip rescue nil
+      @facter['manufacturer']
     end
   end
 
   def _product_name
     unless _is_virtual
-      @os[:dmi][:system][:product_name].strip rescue nil
+      @facter['productname']
     end
   end
 
   def _serial
-    @os[:dmi][:system][:serial_number].strip rescue nil
+    @facter['serialnumber']
   end
 
   # Returns unique identifier of machine
@@ -861,7 +1062,7 @@ class NodeAgent
   # * for physical HW that would be unique chassis id (from BIOS settings)
   # * for other hypervizors - not tested
   def uuid
-    node_uuid = @os.data.fetch(:dmi, {}).fetch(:system, {}).fetch(:uuid, nil)
+    node_uuid = @facter['uuid']
     node_uuid && node_uuid.strip
   end
 
@@ -872,9 +1073,9 @@ class NodeAgent
       :uuid => uuid,
       :runtime_uuid => @settings['runtime_uuid'],
       :product => _product_name,
-      :family => (@os[:dmi][:system][:family].strip rescue nil),
-      :version => (@os[:dmi][:system][:version].strip rescue nil),
-      :fqdn => (@os[:fqdn].strip rescue @os[:hostname].strip rescue nil),
+      :family => (_get_dmidecode_system_info[:system][:family].strip rescue nil),
+      :version => _get_dmi_info[:chassis_version],
+      :fqdn => (@facter['fqdn'].strip rescue @facter['hostname'].strip rescue nil),
     }.delete_if { |key, value| value.nil? or value.empty? or value == "Not Specified" }
   end
 
@@ -929,15 +1130,15 @@ class NodeAgent
     end
   end
 
-  def _ohai_memory
+  def _facter_memory
     info = {}
-    size = @os['memory']['total'].gsub(/(kb|mb|gb)$/i, "").to_i rescue (return nil)
+    size = @facter['memorysize'].gsub(/(kb|mb|gb)$/i, "").to_i rescue (return nil)
     info[:total] = _size(size, $1)
     info
   end
 
   def _get_ip_mac_pair_for(local_addr)
-    @os[:network][:interfaces].each do |_, intinfo|
+    @network[:interfaces].each do |int, intinfo|
       next unless intinfo.has_key?(:addresses)
       intinfo[:addresses].each do |k, v|
         # Here we need to check family because IPAddr.new with bad
@@ -977,16 +1178,16 @@ class NodeAgent
 
   def _data
     res = {
-      :mac => (@os[:macaddress] rescue nil),
-      :ip  => (@os[:ipaddress] rescue nil),
-      :os_platform => (@os[:platform] rescue nil),
+      :mac => (@network[:mac] rescue nil),
+      :ip  => (@facter['ipaddress'] rescue nil),
+      :os_platform => (@facter['operatingsystem'].downcase rescue nil)
     }
     begin
       detailed_data = _detailed
       master_data=_master_ip_and_mac
       res.merge!({
-        :ip  => (( master_data[:ip] or @os[:ipaddress]) rescue nil),
-        :mac  => (( master_data[:mac] or @os[:macaddress]) rescue nil),
+        :ip => (( master_data[:ip] or @facter['ipaddress']) rescue nil),
+        :mac => (( master_data[:mac] or @network[:mac]) rescue nil),
         :manufacturer => _manufacturer,
         :platform_name => _product_name,
         :meta => detailed_data
@@ -1074,8 +1275,8 @@ class NodeAgent
   end
 
   def supported_hugepages
-    return [2048, 1048576] if @os[:cpu]['0']['flags'].include?('pdpe1gb')
-    return [2048] if @os[:cpu]['0']['flags'].include?('pse')
+    return [2048, 1048576] if _get_detailed_cpuinfo['0'][:flags].include?('pdpe1gb')
+    return [2048] if _get_detailed_cpuinfo['0'][:flags].include?('pse')
     []
   end
 
