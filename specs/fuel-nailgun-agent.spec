@@ -1,6 +1,6 @@
 %define name nailgun-agent
 %{!?version: %define version 7.0.0}
-%{!?release: %define release 1}
+%{!?release: %define release 2}
 
 Name:      %{name}
 Version:   %{version}
@@ -18,7 +18,7 @@ Requires:  ethtool
 Requires:  rubygem-httpclient
 Requires:  rubygem-ipaddress
 Requires:  rubygem-json
-Requires:  rubygem-ohai
+Requires:  facter
 Requires:  rubygem-rethtool
 Requires:  rubygems
 
