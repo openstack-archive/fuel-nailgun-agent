@@ -1,3 +1,9 @@
+nailgun-agent (7.0.0-2) trusty; urgency=low
+
+  * Remove ohai-related code
+
+ -- Sergii Rizvan <srizvan@mirantis.com>  Thu, 21 Sep 2016 19:50:00 +0300
+
 nailgun-agent (7.0.0-1) trusty; urgency=low
 
   * Update version to 7.0.0
