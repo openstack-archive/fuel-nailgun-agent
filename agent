@@ -434,6 +434,16 @@ class NodeAgent
             rescue
               int_meta[:current_speed] = nil
             end
+
+            unless int_meta[:driver]
+              # Rethtool::InterfaceSettings calls two ioctls: with
+              # ETHTOOL_CMD_GSET and ETHTOOL_CMD_GDRVINFO commands.
+              # But for virtio adapters the first is not implemented,
+              # but the second is. So try to get driver info at least
+              # in this fallback chain.
+              int_meta[:driver], int_meta[:bus_info] = _get_interface_driver_info(int)
+            end
+
           elsif (addrinfo[:family] rescue nil) =~ /^inet$/
             int_meta[:ip] = addr
             int_meta[:netmask] = addrinfo[:netmask] if addrinfo[:netmask]
@@ -559,6 +569,16 @@ class NodeAgent
     end
 
     detailed_meta
+  end
+
+  def _get_interface_driver_info(int)
+    cmd_driver = Rethtool::EthtoolCmdDriver.new
+    cmd_driver.cmd = Rethtool::ETHTOOL_CMD_GDRVINFO
+    data = Rethtool.ioctl(int, cmd_driver)
+    [data.driver.pack('c*').delete("\000"), data.bus_info.pack('c*').delete("\000")]
+  rescue => e
+    @logger.error("Error '#{e.message}' while obtaining #{int} driver info.")
+    [nil, nil]
   end
 
   def multipath_devices
