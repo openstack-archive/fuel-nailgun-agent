@@ -372,7 +372,16 @@ class NodeAgent
               re = perm_addr.match(/(00(:00){5})+/).nil? ? /[0-9a-f]+(:[0-9a-f]+){5}$/ : nil
             end
             int_meta[:mac] = perm_addr.match(re)[0] rescue addr
-            int_meta[:pxe] = admin_mac == int_meta[:mac]
+            int_meta[:pxe] = false
+            if File.exist? "/sys/class/net/#{int_meta[:name]}/brport"
+              bridge_mac = nil
+              File.open("/sys/class/net/#{int_meta[:name]}/brport/bridge/address") do |f|
+                bridge_mac = f.read.chomp.downcase
+              end
+              int_meta[:pxe] = admin_mac == bridge_mac
+            else
+              int_meta[:pxe] = admin_mac == int_meta[:mac]
+            end
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
               int_meta[:driver] = int_info.driver
