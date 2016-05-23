@@ -329,6 +329,47 @@ class NodeAgent
     nil
   end
 
+  def _is_in_bond(iface_name)
+    File.exist? "/sys/class/net/#{iface_name}/master"
+  end
+
+  def _is_in_bridge(iface_name)
+    File.exist? "/sys/class/net/#{iface_name}/brport"
+  end
+
+  def _get_iface_bridge_name(iface_name)
+    File.basename(File.readlink("/sys/class/net/#{iface_name}/brport/bridge"))
+  end
+
+  def _get_iface_bond_name(iface_name)
+    File.basename(File.readlink("/sys/class/net/#{iface_name}/master"))
+  end
+
+  def _get_interface_mac(iface_name)
+    mac = "00:00:00:00:00:00"
+    File.open("/sys/class/net/#{iface_name}/address") do
+    |file|
+      mac = file.readlines[0].chomp.downcase
+    end
+    return mac
+  end
+
+
+  def _get_parent_interface(iface_name)
+    if _is_in_bond(iface_name)
+      bond_name = _get_iface_bond_name(iface_name)
+      if _is_in_bridge(bond_name)
+        return _get_iface_bridge_name(bond_name)
+      else
+        return bond_name
+      end
+    elsif _is_in_bridge(iface_name)
+      return _get_iface_bridge_name(iface_name)
+    else
+      return iface_name
+    end
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -372,7 +413,8 @@ class NodeAgent
               re = perm_addr.match(/(00(:00){5})+/).nil? ? /[0-9a-f]+(:[0-9a-f]+){5}$/ : nil
             end
             int_meta[:mac] = perm_addr.match(re)[0] rescue addr
-            int_meta[:pxe] = admin_mac == int_meta[:mac]
+            int_meta[:pxe] = false
+            int_meta[:pxe] = _get_interface_mac(_get_parent_interface(int_meta[:name])) == admin_mac.downcase
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
               int_meta[:driver] = int_info.driver
