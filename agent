@@ -324,6 +324,59 @@ class NodeAgent
     nil
   end
 
+  def _is_in_bond(iface_name)
+    File.exist? "/sys/class/net/#{iface_name}/master" rescue False
+  end
+
+  def _is_in_bridge(iface_name)
+    File.exist? "/sys/class/net/#{iface_name}/brport" rescue False
+  end
+
+  def _get_iface_bridge_name(iface_name)
+    File.basename(File.readlink("/sys/class/net/#{iface_name}/brport/bridge"))
+  end
+
+  def _get_iface_bond_name(iface_name)
+    File.basename(File.readlink("/sys/class/net/#{iface_name}/master"))
+  end
+
+  def _get_interface_mac(iface_name, swaddr)
+    # Get original mac excluding case with empty EEPROM data
+    mac = "00:00:00:00:00:00"
+    # It is a virtual device, lets read address file in sysfs
+    if File.exist? "/sys/devices/virtual/net/#{iface_name}"
+      File.open("/sys/devices/virtual/net/#{iface_name}/address") do
+      |file|
+        mac = file.readlines[0].chomp.downcase
+      end
+      return mac
+    end
+    # It is not a virtual device, lets ask ethtool first
+    perm_addr = `ethtool -P #{iface_name}`
+    begin
+      re = eval '/(?<=Permanent address: )(?!00(:00){5}).+/'
+    rescue SyntaxError
+      re = perm_addr.match(/(00(:00){5})+/).nil? ? /[0-9a-f]+(:[0-9a-f]+){5}$/ : nil
+    end
+    mac = perm_addr.match(re)[0] rescue swaddr
+    mac.downcase
+  end
+
+  def _get_parent_interface(iface_name)
+    if _is_in_bond(iface_name)
+      bond_name = _get_iface_bond_name(iface_name)
+      if _is_in_bridge(bond_name)
+        return _get_iface_bridge_name(bond_name)
+      else
+        return bond_name
+      end
+    elsif _is_in_bridge(iface_name)
+      return _get_iface_bridge_name(iface_name)
+    else
+      iface_name
+    end
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -361,13 +414,8 @@ class NodeAgent
           if (addrinfo[:family] rescue nil) =~ /lladdr/
             # Get original mac excluding case with empty EEPROM data
             perm_addr = `ethtool -P #{int}`
-            begin
-              re = eval '/(?<=Permanent address: )(?!00(:00){5}).+/'
-            rescue SyntaxError
-              re = perm_addr.match(/(00(:00){5})+/).nil? ? /[0-9a-f]+(:[0-9a-f]+){5}$/ : nil
-            end
-            int_meta[:mac] = perm_addr.match(re)[0] rescue addr
-            int_meta[:pxe] = admin_mac == int_meta[:mac]
+            int_meta[:mac] = _get_interface_mac(int_meta[:name], addr)
+            int_meta[:pxe] = _get_interface_mac(_get_parent_interface(int_meta[:name]), addr) == admin_mac.downcase
             begin
               int_info = Rethtool::InterfaceSettings.new(int)
               int_meta[:driver] = int_info.driver
