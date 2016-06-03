@@ -322,7 +322,7 @@ class NodeAgent
 
   def nic_numa_node(int_bus_info)
     numa_node = @numa_topology[:numa_nodes].select { |node|
-      node[:pcidevs].include?(int_meta[:bus_info])
+      node[:pcidevs].include?(int_bus_info)
     }
     numa_node.first[:id].to_i
   rescue
