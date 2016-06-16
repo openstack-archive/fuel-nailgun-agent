@@ -4,16 +4,16 @@ Priority: extra
 Maintainer: PKG OpenStack <openstack-devel@lists.alioth.debian.org>
 Build-Depends: debhelper (>= 9), openstack-pkg-tools
 Standards-Version: 3.9.6
-Homepage: https://github.com/stackforge/fuel-nailgun-agent
-Vcs-Git: https://github.com/stackforge/fuel-nailgun-agent.git
-Vcs-Browser: https://github.com/stackforge/fuel-nailgun-agent
+Homepage: https://github.com/openstack/fuel-nailgun-agent
+Vcs-Git: https://github.com/openstack/fuel-nailgun-agent.git
+Vcs-Browser: https://github.com/openstack/fuel-nailgun-agent
 
 Package: nailgun-agent
 Architecture: all
 XB-Ruby-Versions: ${ruby:Versions}
 Recommends: lshw,
             pciutils
-Depends: ohai (<< 7),
+Depends: ohai,
          dmidecode,
          ethtool,
          ruby-cstruct,
