@@ -1006,7 +1006,7 @@ class NodeAgent
     Timeout::timeout(lshw_timeout) do
       lshw_path = `which lshw`.chomp
       if $?.success?
-        data = `#{lshw_path} -json`
+        data = `#{lshw_path} -json -sanitize`
         return JSON.parse(data) if $?.success?
         @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{$?.exitstatus}")
       else
