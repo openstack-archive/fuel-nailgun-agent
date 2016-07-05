@@ -599,6 +599,7 @@ class NodeAgent
         #int = intinfo[:name]
         # Send info about physical interfaces only
 
+        next if int =~ /.*@.*/
         next if intinfo[:encapsulation] !~ /^Ethernet.*/
         # Avoid virtual devices like loopback, tunnels, bonding, vlans ...
         # TODO(vsharshov): replace below lines by this string after excluding Ruby 1.8
