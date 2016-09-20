@@ -714,7 +714,8 @@ class NodeAgent
     begin
       description, _, components = data.split(/Number\s+Major\s+Minor\s+RaidDevice\s+(State\s+)?/m)
       line_patterns = ['Version', 'Raid Level', 'Raid Devices', 'Active Devices',
-                       'Spare Devices', 'Failed Devices', 'State', 'UUID']
+                       'Spare Devices', 'Failed Devices', 'State', 'UUID',
+                       'Container']
       for line in (description.split("\n")[1..-1] rescue [])
         line.strip!
         next if line == ""
@@ -761,6 +762,9 @@ class NodeAgent
     raise "Path /sys/block does not exist" unless File.exists?("/sys/block")
 
     mds, devices = _find_fake_raid_mds()
+
+    @logger.debug("Found fake RAIDs: #{mds}")
+    @logger.debug("Found components of fake RAIDs: #{devices}")
 
     Dir["/sys/block/*"].each do |block_device_dir|
       basename_dir = File.basename(block_device_dir)
