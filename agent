@@ -79,59 +79,6 @@ def createsig(body)
   Digest::SHA1.hexdigest( digest body )
 end
 
-class McollectiveConfig
-  def initialize(logger)
-    @logger = logger
-    @configfile = '/etc/mcollective/server.cfg'
-  end
-
-  def get_config_by_key(find_key)
-    found_key = nil
-    found_value = nil
-    # This code is from mcollective's sources
-    File.open(@configfile, "r").each do |line|
-      # strip blank spaces, tabs etc off the end of all lines
-      line.gsub!(/\s*$/, "")
-      unless line =~ /^#|^$/
-        if line =~ /(.+?)\s*=\s*(.+)/
-          key = $1
-          val = $2
-          if key == find_key
-            found_key = key
-            found_value = val
-          end
-        end
-      end
-    end
-
-    found_value if found_key
-  end
-
-  def replace_identity(new_id)
-    # check if id complies reqs
-    raise 'Identities can only match /\w\.\-/' unless new_id.to_s.match(/^[\w\.\-]+$/)
-
-    value_from_config = get_config_by_key('identity')
-
-    if value_from_config == new_id.to_s
-      @logger.info "MCollective is up to date with identity = #{new_id}"
-    else
-      config = File.open(@configfile, "rb").read
-      if value_from_config
-        # Key found, but it has other value
-        @logger.info "Replacing identity in mcollective server.cfg to new value = '#{new_id}'"
-        config.gsub!(/^identity[ =].*$/, "identity = #{new_id}")
-        File.open(@configfile, "w") { |f| f.write(config) }
-      else # if key was not found
-        config += "\nidentity = #{new_id}\n"
-        @logger.info "Identity in mcollective server.cfg has not been found. Setting to '#{new_id}'"
-        File.open(@configfile, "w") { |f| f.write(config) }
-      end
-      puts `service mcollective restart`
-    end
-  end
-end
-
 class Offloading
   def initialize(name, sub)
     @name, @sub = name, sub
@@ -1343,20 +1290,20 @@ def write_data_to_file(logger, filename, data)
   end
 end
 
-def provisioned?
-  Socket.gethostname != 'bootstrap'
-end
-
 dry_run = false
+obtain_identity = false
 OptionParser.new do |opts|
   opts.banner = "Usage: nailgun-agent [options]"
 
   opts.on("-d", "--dry-run", "Only print collected information, don't send it anywhere.") do |_d|
     dry_run = true
   end
+  opts.on("-i", "--obtain-identity", "Only obtain identity from nailgun and output it") do |_d|
+    obtain_identity = true
+  end
 end.parse!
 
-logger = Logger.new(STDOUT)
+logger = Logger.new(STDERR)
 
 if File.exist?('/etc/nailgun_uid')
   logger.level = Logger::INFO
@@ -1370,11 +1317,6 @@ unless dry_run
   sleep_time = rand(30)
   logger.debug("Sleep for #{sleep_time} seconds before sending request")
   sleep(sleep_time)
-end
-
-if File.exist?('/etc/nailgun-agent/nodiscover')
-  logger.info("Discover prevented by /etc/nailgun-agent/nodiscover presence.")
-  exit 1
 end
 
 agent = NodeAgent.new(logger, dry_run)
@@ -1405,10 +1347,11 @@ begin
     exit 1
   end
   new_id = JSON.parse(resp.body)['id']
-  mc_config = McollectiveConfig.new(logger)
-  unless provisioned?
-    mc_config.replace_identity(new_id)
+  if obtain_identity
+    puts new_id
+    exit 0
   end
+
   write_data_to_file(logger, '/etc/nailgun_uid', new_id.to_s)
 rescue => ex
   # NOTE(mihgen): There is no need to retry - cron will do it for us
