@@ -1002,6 +1002,7 @@ class NodeAgent
   end
 
   def _get_pci_dev_list
+    return {} if `cat /etc/nailgun_systemtype` != 'bootstrap'
     lshw_timeout = @settings['lshw_timeout'] || 60
     Timeout::timeout(lshw_timeout) do
       lshw_path = `which lshw`.chomp
