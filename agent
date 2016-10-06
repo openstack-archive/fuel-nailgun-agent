@@ -1208,11 +1208,12 @@ class NodeAgent
   end
 
   def _get_pci_dev_list
+    return {} if `cat /etc/nailgun_systemtype` != 'bootstrap'
     lshw_timeout = @settings['lshw_timeout'] || 60
     Timeout::timeout(lshw_timeout) do
       lshw_path = `which lshw`.chomp
       if $?.success?
-        data = `#{lshw_path} -json`
+        data = `#{lshw_path} -json -sanitize`
         return JSON.parse(data) if $?.success?
         @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{$?.exitstatus}")
       else
