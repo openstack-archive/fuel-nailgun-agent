@@ -792,10 +792,11 @@ class NodeAgent
   end
 
   def _get_pci_dev_list
+    return {} if `cat /etc/nailgun_systemtype`.chomp != 'bootstrap'
     lshw_path = `which lshw`.chomp
     exitstatus = $?
     if exitstatus == 0
-      data = `#{lshw_path} -json`
+      data = `#{lshw_path} -json -sanitize`
       exitstatus = $?
       if exitstatus == 0
         return JSON.parse(data)
