@@ -140,6 +140,10 @@ class Offloading
   def to_json(options = {})
     {'name' => @name, 'state' => nil, 'sub' => @sub}.to_json()
   end
+
+  def to_s
+    "#{@name}: #{@sub}"
+  end
 end
 
 class NodeAgent
