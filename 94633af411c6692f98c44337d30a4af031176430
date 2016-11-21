@@ -1,0 +1,9 @@
+Code-Review+2: Vladimir Sharshov <vsharshov@mirantis.com>
+Verified+1: Fuel CI <fuel-ci-bot@mirantis.com>
+Workflow+1: Vitaly Sedelnik <vsedelnik@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Mon, 21 Nov 2016 17:03:14 +0000
+Reviewed-on: https://review.openstack.org/399559
+Project: openstack/fuel-nailgun-agent
+Branch: refs/heads/stable/8.0
