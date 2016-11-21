@@ -1049,10 +1049,10 @@ class NodeAgent
   def _manufacturer
     if _is_virtualbox
       @facter['productname']
-    elsif (@facter['manufacturer'].upcase != 'QEMU' && @facter['is_virtual'])
+    elsif (@facter.fetch('manufacturer', '').upcase != 'QEMU' && @facter['is_virtual'])
       @facter['virtual']
     else
-      @facter['manufacturer']
+      @facter.fetch('manufacturer', '')
     end
   end
 
