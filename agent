@@ -293,13 +293,13 @@ class NodeAgent
       res[:interfaces][ifname] = _get_iface_info(ifname)
     end
     %w[inet inet6].each do |family|
-      #default via 10.109.3.1 dev br-ex 
-      #10.109.0.0/24 dev br-fw-admin  proto kernel  scope link  src 10.109.0.4 
-      #10.109.1.0/24 dev br-mgmt  proto kernel  scope link  src 10.109.1.3 
-      #10.109.2.0/24 dev br-storage  proto kernel  scope link  src 10.109.2.3 
-      #10.109.3.0/24 dev br-ex  proto kernel  scope link  src 10.109.3.3 
-      #240.0.0.0/30 dev hapr-host  proto kernel  scope link  src 240.0.0.1 
-      #240.0.0.4/30 dev vr-host-base  proto kernel  scope link  src 240.0.0.5 
+      #default via 10.109.3.1 dev br-ex
+      #10.109.0.0/24 dev br-fw-admin  proto kernel  scope link  src 10.109.0.4
+      #10.109.1.0/24 dev br-mgmt  proto kernel  scope link  src 10.109.1.3
+      #10.109.2.0/24 dev br-storage  proto kernel  scope link  src 10.109.2.3
+      #10.109.3.0/24 dev br-ex  proto kernel  scope link  src 10.109.3.3
+      #240.0.0.0/30 dev hapr-host  proto kernel  scope link  src 240.0.0.1
+      #240.0.0.4/30 dev vr-host-base  proto kernel  scope link  src 240.0.0.5
       `ip -f #{family} route show`.each_line do |line|
         if line =~ /^([^\s]+)\s(.*)$/
           rdest = $1
@@ -872,13 +872,13 @@ class NodeAgent
 
   def _disk_id_by_name(name)
     dn = "/dev/disk/by-id"
-    basepath = Dir["#{dn}/**?"].select{|f| /\/#{name}$/.match(File.readlink(f))}
+    basepath = Dir["#{dn}/**/*?"].select{|f| File.symlink?(f) and /\/#{name}$/.match(File.readlink(f))}
     basepath.map{|p| p.split("/")[2..-1].join("/")}
   end
 
   def _disk_path_by_name(name)
     dn = "/dev/disk/by-path"
-    basepath = Dir["#{dn}/**?"].find{|f| /\/#{name}$/.match(File.readlink(f))}
+    basepath = Dir["#{dn}/**/*?"].find{|f| File.symlink?(f) and /\/#{name}$/.match(File.readlink(f))}
     basepath.split("/")[2..-1].join("/") if basepath
   end
 
