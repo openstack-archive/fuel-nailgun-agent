@@ -1,0 +1,11 @@
+Verified+1: Fuel CI <fuel-ci-bot@mirantis.com>
+Code-Review+1: Michael Polenchuk <mpolenchuk@mirantis.com>
+Code-Review+2: Vladimir Kozhukalov <vkozhukalov@mirantis.com>
+Workflow+1: Vladimir Sharshov <vsharshov@mirantis.com>
+Code-Review+1: Alexander Kislitsky <akislitsky@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Fri, 23 Dec 2016 10:21:34 +0000
+Reviewed-on: https://review.openstack.org/405294
+Project: openstack/fuel-nailgun-agent
+Branch: refs/heads/stable/newton
