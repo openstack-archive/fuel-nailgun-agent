@@ -581,6 +581,23 @@ class NodeAgent
     end
   end
 
+  def _get_max_queues(ifname)
+    data = `ethtool -l #{ifname}`
+    field = 'undefined'
+    data.each_line do |line|
+      case line.strip
+        when 'Pre-set maximums:'
+          field = 'maximums'
+        when /Combined:(\s+)(\d+)/
+          if field == 'maximums'
+            max_queues = $2
+            field = 'undefined'
+          end
+      end
+    end
+    max_queues
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -683,6 +700,7 @@ class NodeAgent
         int_meta[:interface_properties][:pci_id] = nic_pci_id(int)
         # Get numa node
         int_meta[:interface_properties][:numa_node] = nic_numa_node(int_meta[:bus_info])
+        int_meta[:interface_properties][:max_queues] = _get_max_queues(int)
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
