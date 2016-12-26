@@ -581,6 +581,26 @@ class NodeAgent
     end
   end
 
+  def _get_max_queues(ifname)
+    data = `ethtool -l #{ifname}`
+    # Example of output to parse:
+    # Channel parameters for ens4f0:
+    #  Pre-set maximums:
+    #  RX:		0
+    #  TX:		0
+    #  Other:		1
+    #  Combined:	63
+    # Current hardware settings:
+    #  RX:		0
+    #  TX:		0
+    #  Other:		1
+    #  Combined:	40
+    return nil if $?.to_i != 0
+    return data.scan(/Pre-set maximums:.*?Combined:\s*(\d+)/m).join
+  rescue
+    return nil
+  end
+
   def _detailed
     detailed_meta = {
       :system => _system_info,
@@ -684,6 +704,8 @@ class NodeAgent
         int_meta[:interface_properties][:pci_id] = nic_pci_id(int)
         # Get numa node
         int_meta[:interface_properties][:numa_node] = nic_numa_node(int_meta[:bus_info])
+        # Get maximum queues
+        int_meta[:interface_properties][:max_queues] = _get_max_queues(int)
         detailed_meta[:interfaces] << int_meta
       end
     rescue Exception => e
