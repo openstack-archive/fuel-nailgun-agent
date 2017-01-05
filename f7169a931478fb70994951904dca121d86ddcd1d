@@ -1,0 +1,11 @@
+Code-Review+2: Vladimir Sharshov <vsharshov@mirantis.com>
+Verified+1: Fuel CI <fuel-ci-bot@mirantis.com>
+Code-Review+1: Georgy Kibardin <gkibardin@mirantis.com>
+Code-Review+1: Alexey Shtokolov <ashtokolov@mirantis.com>
+Workflow+1: Vladimir Sharshov <vsharshov@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Thu, 05 Jan 2017 14:55:49 +0000
+Reviewed-on: https://review.openstack.org/416970
+Project: openstack/fuel-nailgun-agent
+Branch: refs/heads/stable/newton
