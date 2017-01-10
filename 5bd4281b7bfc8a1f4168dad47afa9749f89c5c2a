@@ -1,0 +1,9 @@
+Code-Review+2: Vladimir Kuklin <vkuklin@mirantis.com>
+Workflow+1: Vladimir Kuklin <vkuklin@mirantis.com>
+Code-Review+1: Stanislaw Bogatkin <sbogatkin@mirantis.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 10 Jan 2017 15:38:28 +0000
+Reviewed-on: https://review.openstack.org/418441
+Project: openstack/fuel-nailgun-agent
+Branch: refs/heads/stable/mitaka
