@@ -167,6 +167,7 @@ class NodeAgent
     @facter = facter_system_info
     @network = _network
     @numa_topology = get_numa_topology
+    @mpath_devices, @skip_devices = multipath_devices
   end
 
   def get_scheme_and_port
@@ -742,13 +743,11 @@ class NodeAgent
         # http://lxr.free-electrons.com/source/drivers/scsi/sd.c?v=4.4#L2340
         block_size = 512
 
-        mpath_devices, skip_devices = _multipath_devices
-
         (_get_blkdev_info or {} rescue {}).each do |bname, binfo|
           @logger.debug("Found block device: #{bname}")
           @logger.debug("Block device info: #{binfo.inspect}")
           dname = bname.gsub(/!/, '/')
-          next if skip_devices.include?(dname)
+          next if @skip_devices.include?(dname)
 
           if physical_data_storage_devices.map{|d| d[:name]}.include?(bname) && binfo
             @logger.debug("Block device seems to be physical data storage: #{bname}")
@@ -772,8 +771,8 @@ class NodeAgent
               :paths => nil
             }
 
-          elsif mpath_devices.has_key?(dname)
-            device = mpath_devices[dname]
+          elsif @mpath_devices.has_key?(dname)
+            device = @mpath_devices[dname]
             detailed_meta[:disks] << {
               :name => 'mapper/' + device["DM_NAME"],
               :model => binfo[:model],
@@ -804,13 +803,8 @@ class NodeAgent
     [nil, nil]
   end
 
-  def _multipath_devices
-    @logger.debug("Waiting for udev to complete evaluating rules")
-    `udevadm settle`
-
-    dmsetup_command = "/sbin/dmsetup info -c --nameprefixes --noheadings -o blkdevname,subsystem,blkdevs_used,name,uuid"
-    @logger.debug("Running command: #{dmsetup_command}")
-    dmsetup = `#{dmsetup_command}`
+  def multipath_devices
+    dmsetup = `/sbin/dmsetup info -c --nameprefixes --noheadings -o blkdevname,subsystem,blkdevs_used,name,uuid`
     # Example output:
     # DM_BLKDEVNAME='dm-0':DM_SUBSYSTEM='mpath':DM_BLKDEVS_USED='sdb,sda':DM_NAME='31234567890abcdef':DM_UUID='mpath-31234567890abcdef'
     # DM_BLKDEVNAME='dm-1':DM_SUBSYSTEM='mpath':DM_BLKDEVS_USED='sdc,sdd':DM_NAME='92344567890abcdef':DM_UUID='mpath-92344567890abcdef'
@@ -831,10 +825,7 @@ class NodeAgent
         end
         mpath_devices[device["DM_BLKDEVNAME"]] = device
       end
-      mapping.uniq!
     end
-    @logger.debug("Multipath devices: #{mpath_devices}")
-    @logger.debug("Physical devices that are used in multipath devices: #{mapping}")
     [mpath_devices, mapping]
   rescue => e
     @logger.error("Error '#{e.message}' while scanning for multipath devices.")
@@ -1018,9 +1009,6 @@ class NodeAgent
       end
       @logger.debug("Device #{devname} udev properties: #{properties.inspect}")
 
-      @logger.debug("Filtering out devices that are used in multipath devices: 'DM_MULTIPATH_DEVICE_PATH' = '1'")
-      next if properties['DM_MULTIPATH_DEVICE_PATH'] == '1'
-
       @logger.debug("Trying to find out if device #{devname} is removable or not")
       if File.exists?("/sys/block/#{basename_dir}/removable")
         removable = File.open("/sys/block/#{basename_dir}/removable"){ |f| f.read_nonblock(1024).strip }
@@ -1028,20 +1016,18 @@ class NodeAgent
       @logger.debug("Device #{devname} removable parameter: #{removable.inspect}")
 
       if STORAGE_CODES.include?(properties['MAJOR'].to_i)
+        @logger.debug("Device #{devname} seems to be appropriate")
         # Exclude LVM volumes (in CentOS - 253, in Ubuntu - 252) using additional check
         # Exclude any storage device connected through USB by the default
-        @logger.debug("Trying to exclude LVM volumes and USB devices")
         next if properties['DEVPATH'].include?('virtual/block/dm') ||
                 (properties['ID_BUS'] == 'usb' &&
                  !@settings.has_key?("report_usb_block_devices"))
-
-        @logger.debug("Device #{devname} seems to be appropriate")
-        @blocks << {
-          :name => basename_dir,
-          :disk => _disk_path_by_name(devname) || devname,
-          :extra => _disk_id_by_name(devname) || [],
-          :removable => removable,
-        }
+          @blocks << {
+            :name => basename_dir,
+            :disk => _disk_path_by_name(devname) || devname,
+            :extra => _disk_id_by_name(devname) || [],
+            :removable => removable,
+          }
       end
     end
     @logger.debug("Final list of physical devices is: #{@blocks.inspect}")
