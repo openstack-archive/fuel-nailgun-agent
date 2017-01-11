@@ -510,9 +510,9 @@ class NodeAgent
     DEFAULT_SRIOV
   end
 
-  def nic_pci_id(int)
-    vendor = File.read("/sys/class/net/#{int}/device/vendor").chomp.gsub(/^0x/, '')
-    device = File.read("/sys/class/net/#{int}/device/device").chomp.gsub(/^0x/, '')
+  def nic_pci_id(bus_info)
+    vendor = File.read("/sys/bus/pci/devices/#{bus_info}/vendor").chomp.gsub(/^0x/, '')
+    device = File.read("/sys/bus/pci/devices/#{bus_info}/device").chomp.gsub(/^0x/, '')
     "#{vendor}:#{device}"
   rescue
     ""
@@ -700,7 +700,7 @@ class NodeAgent
         # Getting SR-IOV info
         int_meta[:interface_properties][:sriov] = sriov_info(int, int_meta[:bus_info])
         # Get PCI-ID
-        int_meta[:interface_properties][:pci_id] = nic_pci_id(int)
+        int_meta[:interface_properties][:pci_id] = nic_pci_id(int_meta[:bus_info])
         # Get numa node
         int_meta[:interface_properties][:numa_node] = nic_numa_node(int_meta[:bus_info])
         # Get maximum queues
