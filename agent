@@ -332,9 +332,11 @@ class NodeAgent
       iface = $2
     end
     result = _get_all_interfaces_info
-    result[:default_gateway] = gw
-    result[:default_interface] = iface
-    result[:mac] = @facter["macaddress_#{iface.gsub('-', '_')}"].upcase
+    if gw and iface
+      result[:default_gateway] = gw
+      result[:default_interface] = iface
+      result[:mac] = @facter["macaddress_#{iface.gsub('-', '_')}"].upcase
+    end
     result
   end
 
