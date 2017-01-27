@@ -1235,6 +1235,23 @@ class NodeAgent
     res
   end
 
+  def traverse(item, &block)
+    yield item
+    if item.is_a?(Hash)
+      item.each { |k,v| traverse(v, &block) }
+    elsif item.is_a?(Array)
+      item.each { |elem| traverse(elem, &block) }
+    end
+  end
+ 
+  #todo: move all quirks here
+  def fixup(data)
+    traverse(data) do |item|
+      # size for CPU means current clock frequency which constantly changes
+      item.delete(:size) if item.is_a?(Hash) and item.fetch(:class, nil) == 'processor'
+    end
+  end
+
   def _get_pci_dev_list
     return {} if `cat /etc/nailgun_systemtype`.chomp != 'bootstrap'
     lshw_timeout = @settings['lshw_timeout'] || 60
@@ -1242,7 +1259,7 @@ class NodeAgent
       lshw_path = `which lshw`.chomp
       if $?.success?
         data = `#{lshw_path} -json -sanitize`
-        return JSON.parse(data) if $?.success?
+        return fixup(JSON.parse(data)) if $?.success?
         @logger.warn("Can't get data from lshw. Reason: lshw exited with status #{$?.exitstatus}")
       else
         @logger.warn("Can't find lshw. Reason: 'which lshw' returned exit status #{$?.exitstatus}")
