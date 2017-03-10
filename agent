@@ -757,7 +757,7 @@ class NodeAgent
 
   def _multipath_devices
     @logger.debug("Waiting for udev to complete evaluating rules")
-    `udevadm settle`
+    `udevadm settle --timeout=20`
 
     dmsetup_command = "/sbin/dmsetup info -c --nameprefixes --noheadings -o blkdevname,subsystem,blkdevs_used,name,uuid"
     @logger.debug("Running command: #{dmsetup_command}")
