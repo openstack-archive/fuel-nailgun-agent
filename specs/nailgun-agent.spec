@@ -15,6 +15,7 @@ BuildArch: noarch
 
 Requires:  dmidecode
 Requires:  ethtool
+Requires:  lshw
 Requires:  rubygem-httpclient
 Requires:  rubygem-ipaddress
 Requires:  rubygem-json
