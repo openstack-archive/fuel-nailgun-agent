@@ -11,9 +11,9 @@ Vcs-Browser: https://github.com/openstack/fuel-nailgun-agent
 Package: nailgun-agent
 Architecture: all
 XB-Ruby-Versions: ${ruby:Versions}
-Recommends: lshw,
 Depends: facter,
          ethtool,
+         lshw,
          ruby-cstruct,
          ruby-httpclient,
          ruby-ipaddress,
